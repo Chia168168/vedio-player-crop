@@ -1,0 +1,344 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>手機影片編輯器</title>
+    <style>
+        /* --- CSS 樣式設定 --- */
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+            background-color: #f4f4f9;
+            color: #333;
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+            overflow: hidden; /* 防止滾動條出現 */
+        }
+
+        header {
+            background-color: #007aff;
+            color: white;
+            padding: 10px;
+            text-align: center;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+
+        main {
+            flex-grow: 1;
+            display: flex;
+            flex-direction: column;
+            padding: 10px;
+            gap: 10px;
+        }
+
+        /* 影片播放區域 */
+        #videoContainer {
+            flex-grow: 1;
+            background-color: #000;
+            border-radius: 8px;
+            overflow: hidden;
+            position: relative;
+        }
+
+        #videoPlayer {
+            width: 100%;
+            height: 100%;
+            display: block;
+        }
+
+        /* 控制面板 */
+        .controls {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px;
+            background-color: #fff;
+            border-radius: 8px;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+        }
+
+        .control-group button, .control-group select {
+            padding: 8px 12px;
+            margin-left: 5px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: background-color 0.2s;
+        }
+
+        .control-group button {
+            background-color: #e0e0e0;
+            color: #333;
+        }
+
+        .control-group button:active {
+            background-color: #ccc;
+        }
+
+        .control-group select {
+            padding: 8px;
+            border-radius: 5px;
+            border: 1px solid #ccc;
+        }
+
+        /* 狀態顯示 */
+        #statusDisplay {
+            text-align: center;
+            padding: 5px;
+            background-color: #e6f7ff;
+            color: #007aff;
+            font-weight: bold;
+        }
+
+        /* 下方縮圖/進度控制 */
+        #progressArea {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            height: 150px; /* 固定高度 */
+        }
+
+        #progressSlider {
+            width: 100%;
+            height: 10px;
+            background-color: #ddd;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+
+        #frameInfo {
+            text-align: center;
+            font-size: 12px;
+            color: #666;
+        }
+
+        /* 上傳/圖片區域 */
+        #uploadArea {
+            padding: 10px;
+            background-color: #fff;
+            border-radius: 8px;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+            text-align: center;
+        }
+
+        #fileInput {
+            display: none; /* 隱藏實際的檔案輸入框 */
+        }
+
+        #uploadButton {
+            background-color: #28a745;
+            color: white;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+        }
+    </style>
+</head>
+<body>
+
+    <header>
+        <h1>手機影片編輯器</h1>
+    </header>
+
+    <main>
+        <!-- 影片播放區域 -->
+        <div id="videoContainer">
+            <video id="videoPlayer" controls autoplay muted></video>
+        </div>
+
+        <!-- 控制面板 -->
+        <div class="controls">
+            <div class="control-group">
+                <button id="playPauseBtn">播放/暫停</button>
+                <button id="seekForwardBtn">快進</button>
+                <button id="seekBackwardBtn">快退</button>
+                <button id="saveFrameBtn">儲存畫面</button>
+            </div>
+
+            <div class="control-group">
+                <label for="speedSelect">速度:</label>
+                <select id="speedSelect">
+                    <option value="1.0">1.0 倍</option>
+                    <option value="2.0">2.0 倍</option>
+                    <option value="0.5">0.5 倍</option>
+                    <option value="0.1">0.1 倍</option>
+                    <option value="1">每秒 1 Frame</option>
+                </select>
+            </div>
+            
+            <div id="statusDisplay">狀態: 準備就緒</div>
+        </div>
+
+        <!-- 進度與幀資訊 -->
+        <div id="progressArea">
+            <input type="range" id="progressSlider" min="0" max="100" value="0" step="1">
+            <div id="frameInfo">
+                秒數: 0.00 / Frame: N/A
+            </div>
+        </div>
+
+        <!-- 上傳圖片區域 -->
+        <div id="uploadArea">
+            <p>上傳圖片 (作為參考或疊加)</p>
+            <input type="file" id="fileInput" accept="image/*">
+            <button id="uploadButton">選擇圖片</button>
+        </div>
+
+    </main>
+
+    <script>
+        // --- JavaScript 邏輯 ---
+
+        const video = document.getElementById('videoPlayer');
+        const playPauseBtn = document.getElementById('playPauseBtn');
+        const seekForwardBtn = document.getElementById('seekForwardBtn');
+        const seekBackwardBtn = document.getElementById('seekBackwardBtn');
+        const saveFrameBtn = document.getElementById('saveFrameBtn');
+        const speedSelect = document.getElementById('speedSelect');
+        const progressSlider = document.getElementById('progressSlider');
+        const frameInfo = document.getElementById('frameInfo');
+        const fileInput = document.getElementById('fileInput');
+        const uploadButton = document.getElementById('uploadButton');
+        const statusDisplay = document.getElementById('statusDisplay');
+
+        let isPlaying = false;
+        let currentPlaybackRate = 1.0;
+        let frameCount = 0;
+        let isFrameMode = false; // 標誌是否處於單幀播放模式
+
+        // --- 1. 影片控制 ---
+
+        playPauseBtn.addEventListener('click', () => {
+            if (video.paused || video.ended) {
+                video.play();
+                isPlaying = true;
+                playPauseBtn.textContent = '暫停';
+                statusDisplay.textContent = '狀態: 正在播放';
+            } else {
+                video.pause();
+                isPlaying = false;
+                playPauseBtn.textContent = '播放';
+                statusDisplay.textContent = '狀態: 暫停';
+            }
+        });
+
+        seekForwardBtn.addEventListener('click', () => {
+            video.currentTime += 5; // 快進 5 秒
+        });
+
+        seekBackwardBtn.addEventListener('click', () => {
+            video.currentTime = Math.max(0, video.currentTime - 5); // 快退 5 秒，確保不小於 0
+        });
+
+        speedSelect.addEventListener('change', (e) => {
+            currentPlaybackRate = parseFloat(e.target.value);
+            video.playbackRate = currentPlaybackRate;
+            statusDisplay.textContent = `速度已設定為: ${currentPlaybackRate} 倍`;
+        });
+
+        // 監聽影片時間變化，更新進度滑桿和秒數顯示
+        video.addEventListener('timeupdate', () => {
+            if (isPlaying) {
+                // 更新滑桿位置 (0-100)
+                const percentage = (video.currentTime / video.duration) * 100;
+                progressSlider.value = Math.min(100, Math.max(0, percentage));
+                
+                // 更新秒數顯示
+                frameInfo.textContent = `秒數: ${video.currentTime.toFixed(2)} / Frame: N/A`;
+            }
+        });
+
+        // 影片結束時處理
+        video.addEventListener('ended', () => {
+            isPlaying = false;
+            playPauseBtn.textContent = '播放';
+            statusDisplay.textContent = '狀態: 播放結束';
+            progressSlider.value = 0;
+            frameInfo.textContent = '秒數: 0.00 / Frame: N/A';
+        });
+
+
+        // --- 2. 幀 (Frame) 模式控制 ---
+
+        // 模擬每幀更新邏輯 (這需要更精確的幀率控制，這裡使用 setInterval 模擬)
+        function startFrameMode() {
+            if (isPlaying) {
+                video.pause();
+                isPlaying = false;
+                playPauseBtn.textContent = '播放';
+                statusDisplay.textContent = '狀態: 進入單幀模式';
+            }
+            isFrameMode = true;
+            frameInfo.textContent = '秒數: N/A / Frame: 0';
+            
+            // 設置一個定時器，模擬每秒處理一個幀 (或根據選擇的幀率)
+            const frameInterval = 1000 / parseFloat(speedSelect.value); // 根據選擇的速度計算間隔
+            
+            const frameTimer = setInterval(() => {
+                if (video.paused || video.ended) {
+                    clearInterval(frameTimer);
+                    isFrameMode = false;
+                    statusDisplay.textContent = '狀態: 退出單幀模式';
+                    return;
+                }
+
+                // 模擬：在單幀模式下，我們只關注時間的增長
+                frameCount++;
+                
+                // 為了讓滑桿能反映進度，我們需要一個機制來計算當前幀對應的百分比
+                // 由於我們無法直接獲取幀數，我們將滑桿固定在 100% 模擬，並顯示幀數
+                progressSlider.value = 100; 
+                frameInfo.textContent = `秒數: ${video.currentTime.toFixed(2)} / Frame: ${frameCount}`;
+
+            }, frameInterval);
+        }
+
+        // 綁定幀模式切換 (假設我們需要一個隱藏的按鈕來切換)
+        // 為了簡化，我們讓用戶在控制面板中選擇一個選項來啟動幀模式
+        // (在實際應用中，您可能需要一個明確的「進入幀模式」按鈕)
+        
+        // 為了演示，我們讓用戶點擊一個假設的按鈕來切換
+        // 這裡我們將「儲存畫面」功能改為「進入幀模式」的觸發點
+        saveFrameBtn.addEventListener('click', () => {
+            if (video.paused || video.ended) {
+                video.play();
+                startFrameMode();
+            } else {
+                // 如果正在播放，則進入幀模式
+                startFrameMode();
+            }
+        });
+
+
+        // --- 3. 圖片上傳功能 ---
+        uploadButton.addEventListener('click', () => {
+            fileInput.click();
+        });
+
+        fileInput.addEventListener('change', (event) => {
+            const file = event.target.files[0];
+            if (file) {
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    // 在這裡，您需要將圖片 (e.target.result) 應用到影片的特定層級上 (例如使用 Canvas 疊加)
+                    alert(`圖片已選擇: ${file.name}。在實際應用中，這將用於疊加效果。`);
+                    // 範例：如果需要將圖片顯示在螢幕上，可以創建一個新的 <img> 元素並顯示它。
+                };
+                reader.readAsDataURL(file);
+            }
+        });
+
+        // --- 初始化 ---
+        video.addEventListener('load', () => {
+            statusDisplay.textContent = '狀態: 影片載入完成';
+        });
+
+    </script>
+</body>
+</html>
