@@ -380,6 +380,15 @@
   #loop-export:active { opacity: 0.6; }
   #loop-export:disabled { opacity: 0.3; cursor: not-allowed; }
 
+  #loop-convert {
+    background: transparent; border: 1.5px solid rgba(71,212,255,0.3);
+    border-radius: 100px; padding: 5px 11px;
+    color: var(--accent2); font-family: 'DM Mono', monospace;
+    font-size: 12px; cursor: pointer; white-space: nowrap; flex-shrink: 0;
+    transition: all 0.15s;
+  }
+  #loop-convert:active { opacity: 0.6; }
+
   #export-format {
     background: transparent; border: 1.5px solid rgba(255,255,255,0.2);
     border-radius: 100px; padding: 5px 8px;
@@ -597,6 +606,7 @@
         <option value="mov">MOV</option>
       </select>
       <button id="loop-export">✂ 剪輯</button>
+      <button id="loop-convert">⇄ 轉檔</button>
       <div id="loop-range-display">—</div>
     </div>
   </div>
@@ -1575,6 +1585,91 @@ exportCancelBtn.addEventListener('click', () => {
   ffmpegLoaded = false;
   exportOverlay.classList.remove('show');
   showToast('已取消');
+});
+
+// ── Convert only (no clip, -c copy) ──
+document.getElementById('loop-convert').addEventListener('click', async e => {
+  e.stopPropagation();
+  if (!currentFile) { showToast('沒有影片檔案'); return; }
+
+  const formatSel = document.getElementById('export-format').value;
+  const srcExt = currentFile.name.split('.').pop().toLowerCase();
+  const outExt = formatSel === 'original' ? srcExt : formatSel;
+
+  if (outExt === srcExt) {
+    showToast('格式相同，無需轉換'); return;
+  }
+
+  exportCancelled = false;
+  exportOverlay.classList.add('show');
+  exportStatus.textContent = '準備中…';
+  exportProgressF.style.width = '0%';
+
+  try {
+    const { createFFmpeg, fetchFile } = FFmpeg;
+
+    if (!ffmpegInstance) {
+      ffmpegInstance = createFFmpeg({
+        log: false,
+        corePath: window.location.origin + '/ffmpeg/ffmpeg-core.js',
+      });
+    }
+    if (!ffmpegLoaded) {
+      exportStatus.textContent = '載入 FFmpeg…（首次約需 30 秒）';
+      await ffmpegInstance.load();
+      ffmpegLoaded = true;
+    }
+
+    if (exportCancelled) { exportOverlay.classList.remove('show'); return; }
+
+    exportStatus.textContent = '寫入檔案…';
+    exportProgressF.style.width = '10%';
+
+    const inName = 'input.' + srcExt;
+    ffmpegInstance.FS('writeFile', inName, await fetchFile(currentFile));
+
+    if (exportCancelled) { exportOverlay.classList.remove('show'); return; }
+
+    exportStatus.textContent = `轉換 ${srcExt.toUpperCase()} → ${outExt.toUpperCase()}…`;
+    exportProgressF.style.width = '20%';
+
+    const outName = 'output.' + outExt;
+    // Pure container remux — no re-encode, very fast
+    await ffmpegInstance.run(
+      '-i', inName,
+      '-c', 'copy',
+      '-movflags', '+faststart',
+      outName
+    );
+
+    if (exportCancelled) { exportOverlay.classList.remove('show'); return; }
+
+    exportProgressF.style.width = '95%';
+    exportStatus.textContent = '輸出中…';
+
+    const mimeType = outExt === 'mov' ? 'video/quicktime' : 'video/mp4';
+    const data = ffmpegInstance.FS('readFile', outName);
+    const blob = new Blob([data.buffer], { type: mimeType });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    const base = currentFile.name.replace(/\.[^.]+$/, '') || 'video';
+    a.href = url;
+    a.download = `${base}.${outExt}`;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 3000);
+
+    try { ffmpegInstance.FS('unlink', inName); } catch(e) {}
+    try { ffmpegInstance.FS('unlink', outName); } catch(e) {}
+
+    exportProgressF.style.width = '100%';
+    exportStatus.textContent = '完成！';
+    setTimeout(() => exportOverlay.classList.remove('show'), 1500);
+    showToast(`轉換完成 → ${outExt.toUpperCase()}`);
+
+  } catch(err) {
+    exportOverlay.classList.remove('show');
+    showToast('轉換失敗：' + (err.message || err));
+  }
 });
 </script>
 </body>
