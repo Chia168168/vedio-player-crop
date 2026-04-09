@@ -1600,6 +1600,25 @@ document.getElementById('loop-convert').addEventListener('click', async e => {
     showToast('格式相同，無需轉換'); return;
   }
 
+  const base = currentFile.name.replace(/\.[^.]+$/, '') || 'video';
+
+  // iPhone MOV ↔ MP4: both are ISOBMFF containers — just rebrand, no FFmpeg needed
+  const isISOSwap = (srcExt === 'mov' && outExt === 'mp4') ||
+                    (srcExt === 'mp4' && outExt === 'mov');
+  if (isISOSwap) {
+    const mimeType = outExt === 'mp4' ? 'video/mp4' : 'video/quicktime';
+    const blob = new Blob([currentFile], { type: mimeType });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    a.href = url;
+    a.download = `${base}.${outExt}`;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 3000);
+    showToast(`轉換完成 → ${outExt.toUpperCase()}`);
+    return;
+  }
+
+  // Other format conversions: use FFmpeg
   exportCancelled = false;
   exportOverlay.classList.add('show');
   exportStatus.textContent = '準備中…';
@@ -1634,7 +1653,6 @@ document.getElementById('loop-convert').addEventListener('click', async e => {
     exportProgressF.style.width = '20%';
 
     const outName = 'output.' + outExt;
-    // Pure container remux — no re-encode, very fast
     await ffmpegInstance.run(
       '-i', inName,
       '-c', 'copy',
@@ -1652,7 +1670,6 @@ document.getElementById('loop-convert').addEventListener('click', async e => {
     const blob = new Blob([data.buffer], { type: mimeType });
     const url  = URL.createObjectURL(blob);
     const a    = document.createElement('a');
-    const base = currentFile.name.replace(/\.[^.]+$/, '') || 'video';
     a.href = url;
     a.download = `${base}.${outExt}`;
     document.body.appendChild(a); a.click(); document.body.removeChild(a);
