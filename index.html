@@ -1,0 +1,370 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Browser Video Editor (ffmpeg.wasm + MediaInfo)</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    body {
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      margin: 0; padding: 16px; background: #121212; color: #f5f5f5;
+    }
+    h1 { margin-top: 0; font-size: 20px; }
+    .panel {
+      border: 1px solid #333; border-radius: 6px; padding: 12px 16px;
+      margin-bottom: 16px; background: #1e1e1e;
+    }
+    .row {
+      display: flex; flex-wrap: wrap; gap: 12px; align-items: center;
+      margin-bottom: 8px;
+    }
+    label { font-size: 13px; margin-right: 4px; }
+    input[type="file"], input[type="number"], select {
+      background: #181818; color: #f5f5f5; border: 1px solid #444;
+      border-radius: 4px; padding: 4px 6px; font-size: 13px;
+    }
+    input[type="number"] { width: 80px; }
+    button {
+      background: #2d8cff; color: #fff; border: none; border-radius: 4px;
+      padding: 6px 12px; font-size: 13px; cursor: pointer;
+    }
+    button:disabled { background: #555; cursor: default; }
+    .small-btn { padding: 4px 8px; font-size: 12px; }
+    .info-table { font-size: 12px; border-collapse: collapse; margin-top: 8px; }
+    .info-table td { padding: 2px 4px; border-bottom: 1px solid #333; }
+    .info-label { color: #aaa; white-space: nowrap; }
+    .info-value { font-family: "SF Mono", Consolas, Menlo, monospace; }
+    #log {
+      font-family: "SF Mono", Consolas, Menlo, monospace; font-size: 11px;
+      max-height: 180px; overflow: auto; background: #050505;
+      padding: 8px; border-radius: 4px; border: 1px solid #333;
+      white-space: pre-wrap;
+    }
+    #videoPreview {
+      max-width: 100%; max-height: 320px; background: #000;
+    }
+    .range-row input[type="range"] { flex: 1; }
+    .badge {
+      display: inline-block; padding: 2px 6px; border-radius: 4px;
+      font-size: 11px; background: #333; margin-left: 4px;
+    }
+    .badge.ok { background: #205b2e; }
+    .badge.warn { background: #664a14; }
+    .badge.err { background: #662020; }
+  </style>
+</head>
+<body>
+  <h1>Browser Video Editor (ffmpeg.wasm + MediaInfo)</h1>
+  <div class="panel">
+    <div class="row">
+      <label for="fileInput"><strong>1. Select video:</strong></label>
+      <input id="fileInput" type="file" accept="video/*" />
+      <span id="loadStatus" class="badge">Idle</span>
+    </div>
+    <div class="row">
+      <video id="videoPreview" controls></video>
+    </div>
+    <table class="info-table" id="infoTable" style="display:none"></table>
+  </div>
+  <div class="panel">
+    <div class="row"><strong>2. Trim & basic settings</strong></div>
+    <div class="row">
+      <label>Start (s)</label>
+      <input id="startTime" type="number" min="0" step="0.1" value="0" />
+      <label>End (s)</label>
+      <input id="endTime" type="number" min="0" step="0.1" value="0" />
+      <button id="fitToVideoBtn" class="small-btn">Use full duration</button>
+    </div>
+    <div class="row range-row">
+      <input id="rangeStart" type="range" min="0" max="0" step="0.1" value="0" />
+      <input id="rangeEnd" type="range" min="0" max="0" step="0.1" value="0" />
+    </div>
+    <div class="row">
+      <label>Target width</label>
+      <input id="targetWidth" type="number" min="0" step="2" placeholder="auto" />
+      <label>Target height</label>
+      <input id="targetHeight" type="number" min="0" step="2" placeholder="auto" />
+      <label>FPS</label>
+      <input id="targetFps" type="number" min="1" step="1" placeholder="keep" />
+    </div>
+    <div class="row">
+      <label>CRF (quality)</label>
+      <input id="targetCrf" type="number" min="15" max="40" step="1" value="23" />
+      <label>Preset</label>
+      <select id="presetSelect">
+        <option value="ultrafast">ultrafast</option>
+        <option value="superfast">superfast</option>
+        <option value="veryfast" selected>veryfast</option>
+        <option value="faster">faster</option>
+        <option value="fast">fast</option>
+        <option value="medium">medium</option>
+        <option value="slow">slow</option>
+      </select>
+      <label>Format</label>
+      <select id="formatSelect">
+        <option value="mp4" selected>MP4 (H.264 + AAC)</option>
+        <option value="webm">WebM (VP9 + Opus)</option>
+        <option value="gif">GIF (no audio)</option>
+      </select>
+    </div>
+  </div>
+  <div class="panel">
+    <div class="row"><strong>3. Export</strong></div>
+    <div class="row">
+      <button id="exportBtn" disabled>Export with ffmpeg.wasm</button>
+      <span id="exportStatus" class="badge">Waiting</span>
+      <a id="downloadLink" style="display:none;margin-left:12px" download>Download result</a>
+    </div>
+    <div id="log"></div>
+  </div>
+  <script src="https://unpkg.com/@ffmpeg/ffmpeg@0.12.10/dist/ffmpeg.min.js"></script>
+  <script src="https://unpkg.com/mediainfo.js/dist/mediainfo.min.js"></script>
+  <script>
+    const { createFFmpeg, fetchFile } = FFmpeg;
+    const fileInput = document.getElementById('fileInput');
+    const videoPreview = document.getElementById('videoPreview');
+    const infoTable = document.getElementById('infoTable');
+    const loadStatus = document.getElementById('loadStatus');
+    const startTimeInput = document.getElementById('startTime');
+    const endTimeInput = document.getElementById('endTime');
+    const rangeStart = document.getElementById('rangeStart');
+    const rangeEnd = document.getElementById('rangeEnd');
+    const fitToVideoBtn = document.getElementById('fitToVideoBtn');
+    const targetWidth = document.getElementById('targetWidth');
+    const targetHeight = document.getElementById('targetHeight');
+    const targetFps = document.getElementById('targetFps');
+    const targetCrf = document.getElementById('targetCrf');
+    const presetSelect = document.getElementById('presetSelect');
+    const formatSelect = document.getElementById('formatSelect');
+    const exportBtn = document.getElementById('exportBtn');
+    const exportStatus = document.getElementById('exportStatus');
+    const downloadLink = document.getElementById('downloadLink');
+    const logEl = document.getElementById('log');
+    let ffmpeg = null;
+    let ffmpegReady = false;
+    let currentFile = null;
+    let currentFileName = '';
+    let mediaInfoInstance = null;
+    let videoDuration = 0;
+    let videoWidth = 0;
+    let videoHeight = 0;
+    let videoFps = 0;
+    let videoSizeBytes = 0;
+    let videoFormatStr = '';
+    function log(msg) {
+      console.log(msg);
+      logEl.textContent += msg + '\\n';
+      logEl.scrollTop = logEl.scrollHeight;
+    }
+    async function initMediaInfo() {
+      if (mediaInfoInstance) return mediaInfoInstance;
+      mediaInfoInstance = await MediaInfo({ format: 'object' });
+      return mediaInfoInstance;
+    }
+    async function initFFmpeg() {
+      if (ffmpegReady) return;
+      if (!ffmpeg) {
+        ffmpeg = createFFmpeg({
+          log: true,
+          corePath: "https://unpkg.com/@ffmpeg/core@0.12.10/dist/ffmpeg-core.js"
+        });
+      }
+      log('Loading ffmpeg core (first time may take a while)...');
+      exportStatus.textContent = 'Loading ffmpeg...';
+      await ffmpeg.load();
+      ffmpegReady = true;
+      log('ffmpeg loaded.');
+      exportStatus.textContent = 'ffmpeg ready';
+      exportStatus.className = 'badge ok';
+    }
+    function humanSize(bytes) {
+      if (!bytes && bytes !== 0) return '-';
+      const units = ['B','KB','MB','GB','TB'];
+      let i = 0, v = bytes;
+      while (v >= 1024 && i < units.length - 1) { v /= 1024; i++; }
+      return v.toFixed(2) + ' ' + units[i];
+    }
+    function secondsToTime(s) {
+      if (!isFinite(s)) return '-';
+      const h = Math.floor(s / 3600);
+      const m = Math.floor((s % 3600) / 60);
+      const sec = Math.floor(s % 60);
+      const ms = Math.round((s - Math.floor(s)) * 1000);
+      const pad = n => String(n).padStart(2, '0');
+      const padMs = n => String(n).padStart(3, '0');
+      if (h > 0) return `${pad(h)}:${pad(m)}:${pad(sec)}.${padMs(ms)}`;
+      return `${pad(m)}:${pad(sec)}.${padMs(ms)}`;
+    }
+    function updateInfoTable() {
+      if (!currentFile) { infoTable.style.display = 'none'; return; }
+      infoTable.style.display = '';
+      const rows = [];
+      rows.push(['File name', currentFileName || '(blob)']);
+      rows.push(['File size', humanSize(videoSizeBytes)]);
+      rows.push(['Container / Codec', videoFormatStr || '-']);
+      rows.push(['Duration', secondsToTime(videoDuration)]);
+      rows.push(['Resolution', videoWidth && videoHeight ? `${videoWidth} x ${videoHeight}` : '-']);
+      rows.push(['FPS', videoFps ? videoFps.toFixed(3) : '-']);
+      infoTable.innerHTML = rows.map(([label, value]) =>
+        `<tr><td class="info-label">${label}</td><td class="info-value">${value}</td></tr>`
+      ).join('');
+    }
+    function syncRangeWithInputs() {
+      const start = parseFloat(startTimeInput.value) || 0;
+      const end = parseFloat(endTimeInput.value) || 0;
+      rangeStart.value = Math.max(0, Math.min(start, videoDuration));
+      rangeEnd.value = Math.max(0, Math.min(end, videoDuration));
+    }
+    function syncInputsWithRange() {
+      startTimeInput.value = rangeStart.value;
+      endTimeInput.value = rangeEnd.value;
+    }
+    fileInput.addEventListener('change', async (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      currentFile = file;
+      currentFileName = file.name;
+      videoSizeBytes = file.size;
+      loadStatus.textContent = 'Loading...';
+      loadStatus.className = 'badge warn';
+      exportBtn.disabled = true;
+      downloadLink.style.display = 'none';
+      logEl.textContent = '';
+      const objectUrl = URL.createObjectURL(file);
+      videoPreview.src = objectUrl;
+      try {
+        await initMediaInfo();
+        const mi = await mediaInfoInstance.analyzeData(
+          () => file.size,
+          (chunkSize, offset) => file.slice(offset, offset + chunkSize).arrayBuffer()
+        );
+        let general = mi.media.track.find(t => t['@type'] === 'General') || {};
+        let videoTrack = mi.media.track.find(t => t['@type'] === 'Video') || {};
+        videoDuration = parseFloat(general.Duration) / 1000 || 0;
+        videoWidth = parseInt(videoTrack.Width) || 0;
+        videoHeight = parseInt(videoTrack.Height) || 0;
+        videoFps = parseFloat(videoTrack.FrameRate) || 0;
+        videoFormatStr = (general.Format || '') + (general.CodecID ? ` / ${general.CodecID}` : '') + (videoTrack.Format ? ` (Video: ${videoTrack.Format})` : '');
+        log('MediaInfo:');
+        log(JSON.stringify(mi, null, 2).slice(0, 4000) + '...');
+        rangeStart.min = 0;
+        rangeEnd.min = 0;
+        rangeStart.max = videoDuration || 0;
+        rangeEnd.max = videoDuration || 0;
+        startTimeInput.value = 0;
+        endTimeInput.value = videoDuration.toFixed(3);
+        syncRangeWithInputs();
+        updateInfoTable();
+        loadStatus.textContent = 'Loaded';
+        loadStatus.className = 'badge ok';
+        exportBtn.disabled = false;
+      } catch (err) {
+        console.error(err);
+        log('MediaInfo error: ' + err.message);
+        loadStatus.textContent = 'Error';
+        loadStatus.className = 'badge err';
+      }
+    });
+    fitToVideoBtn.addEventListener('click', () => {
+      if (!videoDuration) return;
+      startTimeInput.value = 0;
+      endTimeInput.value = videoDuration.toFixed(3);
+      syncRangeWithInputs();
+    });
+    rangeStart.addEventListener('input', () => {
+      if (parseFloat(rangeStart.value) > parseFloat(rangeEnd.value)) { rangeEnd.value = rangeStart.value; }
+      syncInputsWithRange();
+    });
+    rangeEnd.addEventListener('input', () => {
+      if (parseFloat(rangeEnd.value) < parseFloat(rangeStart.value)) { rangeStart.value = rangeEnd.value; }
+      syncInputsWithRange();
+    });
+    startTimeInput.addEventListener('change', () => {
+      let v = parseFloat(startTimeInput.value) || 0;
+      v = Math.max(0, Math.min(v, videoDuration));
+      if (v > parseFloat(endTimeInput.value)) { endTimeInput.value = v.toFixed(3); }
+      startTimeInput.value = v.toFixed(3);
+      syncRangeWithInputs();
+    });
+    endTimeInput.addEventListener('change', () => {
+      let v = parseFloat(endTimeInput.value) || 0;
+      v = Math.max(0, Math.min(v, videoDuration || v));
+      if (v < parseFloat(startTimeInput.value)) { startTimeInput.value = v.toFixed(3); }
+      endTimeInput.value = v.toFixed(3);
+      syncRangeWithInputs();
+    });
+    exportBtn.addEventListener('click', async () => {
+      if (!currentFile) { alert('Please select a video first.'); return; }
+      await initFFmpeg();
+      const start = parseFloat(startTimeInput.value) || 0;
+      const end = parseFloat(endTimeInput.value) || 0;
+      const duration = Math.max(0, end - start);
+      if (!duration || duration <= 0) { alert('Please set a valid start and end time.'); return; }
+      const width = parseInt(targetWidth.value) || 0;
+      const height = parseInt(targetHeight.value) || 0;
+      const fps = parseInt(targetFps.value) || 0;
+      const crf = parseInt(targetCrf.value) || 23;
+      const preset = presetSelect.value;
+      const format = formatSelect.value;
+      exportBtn.disabled = true;
+      exportStatus.textContent = 'Transcoding...';
+      exportStatus.className = 'badge warn';
+      downloadLink.style.display = 'none';
+      log('--- Export started ---');
+      try {
+        const inputName = 'input';
+        const ext = (currentFileName.split('.').pop() || 'mp4').toLowerCase();
+        const inputFileName = `${inputName}.${ext}`;
+        ffmpeg.FS('writeFile', inputFileName, await fetchFile(currentFile));
+        const outputExt = format === 'gif' ? 'gif' : (format === 'webm' ? 'webm' : 'mp4');
+        const outputFileName = `output.${outputExt}`;
+        const ffmpegArgs = [];
+        ffmpegArgs.push('-ss', start.toFixed(3));
+        ffmpegArgs.push('-t', duration.toFixed(3));
+        ffmpegArgs.push('-i', inputFileName);
+        if (format !== 'gif') {
+          if (width || height) {
+            const scaleFilter = width && height ? `${width}:${height}` : (width ? `${width}:-2` : `-${2}:${height}`);
+            ffmpegArgs.push('-vf', `scale=${scaleFilter}`);
+          }
+          if (fps) { ffmpegArgs.push('-r', String(fps)); }
+          if (format === 'mp4') {
+            ffmpegArgs.push('-c:v', 'libx264');
+            ffmpegArgs.push('-preset', preset);
+            ffmpegArgs.push('-crf', String(crf));
+            ffmpegArgs.push('-c:a', 'aac');
+            ffmpegArgs.push('-movflags', '+faststart');
+          } else if (format === 'webm') {
+            ffmpegArgs.push('-c:v', 'libvpx-vp9');
+            ffmpegArgs.push('-b:v', '2M');
+            ffmpegArgs.push('-c:a', 'libopus');
+          }
+        } else {
+          ffmpegArgs.push('-vf', `fps=10,scale=${width || 320}:-2`);
+          ffmpegArgs.push('-c:v', 'gif');
+        }
+        ffmpegArgs.push(outputFileName);
+        log('FFmpeg args: ' + ffmpegArgs.join(' '));
+        await ffmpeg.run(...ffmpegArgs);
+        const data = ffmpeg.FS('readFile', outputFileName);
+        const blob = new Blob([data.buffer], { type: format === 'gif' ? 'image/gif' : (format === 'webm' ? 'video/webm' : 'video/mp4') });
+        const url = URL.createObjectURL(blob);
+        downloadLink.href = url;
+        downloadLink.download = `edited_${currentFileName.split('.')[0]}.${outputExt}`;
+        downloadLink.textContent = `Download ${outputExt.toUpperCase()} result`;
+        downloadLink.style.display = '';
+        exportStatus.textContent = 'Done!';
+        exportStatus.className = 'badge ok';
+        log('Export completed successfully!');
+      } catch (err) {
+        console.error(err);
+        log('Export error: ' + err.message);
+        exportStatus.textContent = 'Error';
+        exportStatus.className = 'badge err';
+      } finally {
+        exportBtn.disabled = false;
+      }
+    });
+  </script>
+</body>
+</html>
