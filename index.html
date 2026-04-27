@@ -1533,7 +1533,7 @@ document.getElementById('loop-export').addEventListener('click', async e => {
         outName
       );
     } else {
-      // Same format: keyframe-accurate copy, no blank frames
+      // Keyframe-aligned copy: -ss before -i snaps to nearest keyframe
       await ffmpegInstance.run(
         '-ss', ss,
         '-i', inName,
@@ -1541,8 +1541,6 @@ document.getElementById('loop-export').addEventListener('click', async e => {
         '-map', '0:v:0',
         '-map', '0:a:0?',
         '-c', 'copy',
-        '-avoid_negative_ts', 'make_zero',
-        '-movflags', '+faststart',
         outName
       );
     }
