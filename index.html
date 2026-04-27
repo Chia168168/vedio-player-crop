@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Frame Player">
 <meta name="theme-color" content="#0a0a0c">
-<title>Teng影片播放器</title>
+<title>影片播放器</title>
 <script src="https://unpkg.com/@ffmpeg/ffmpeg@0.11.6/dist/ffmpeg.min.js"></script>
 <style>
   @import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@300;400;500&family=Space+Grotesk:wght@300;400;600&display=swap');
@@ -44,8 +44,7 @@
   }
   .logo {
     font-family: 'DM Mono', monospace;
-    font-size: 15px;
-    font-weight: 600;
+    font-size: 11px;
     letter-spacing: 0.3em;
     color: var(--muted);
     text-transform: uppercase;
@@ -467,7 +466,7 @@
 
 <!-- Upload -->
 <div id="upload-screen">
-  <div class="logo">Teng 影片播放器</div>
+  <div class="logo">Video Frame Player</div>
   <div class="upload-zone">
     <input type="file" id="file-input" accept="video/*">
     <div class="upload-icon">
@@ -525,11 +524,11 @@
     <div id="speed-row">
       <div class="speed-label">速度</div>
       <div class="speed-btns">
-        <button class="speed-btn" data-speed="0.1">0.1</button>
-        <button class="speed-btn" data-speed="0.5">0.5</button>
-        <button class="speed-btn active" data-speed="1">1</button>
-        <button class="speed-btn" data-speed="2">2</button>
-        <button class="speed-btn" data-speed="frame">Frame</button>
+        <button class="speed-btn" data-speed="0.1">× 0.1</button>
+        <button class="speed-btn" data-speed="0.5">× 0.5</button>
+        <button class="speed-btn active" data-speed="1">× 1</button>
+        <button class="speed-btn" data-speed="2">× 2</button>
+        <button class="speed-btn" data-speed="frame">1 Frame/s</button>
       </div>
       <button id="change-video-btn" style="
         flex-shrink:0;margin-left:8px;padding:5px 11px;
@@ -600,14 +599,14 @@
       <button id="loop-set-in">IN</button>
       <button id="loop-set-out">OUT</button>
       <button id="loop-clear">✕</button>
-      <button id="loop-toggle">⟲</button>
+      <button id="loop-toggle">⟲ 循環</button>
       <select id="export-format">
         <option value="original">原格式</option>
         <option value="mp4">MP4</option>
         <option value="mov">MOV</option>
       </select>
-      <button id="loop-export">✂</button>
-      <button id="loop-convert">⇄</button>
+      <button id="loop-export">✂ 剪輯</button>
+      <button id="loop-convert">⇄ 轉檔</button>
       <div id="loop-range-display">—</div>
     </div>
   </div>
@@ -1521,10 +1520,10 @@ document.getElementById('loop-export').addEventListener('click', async e => {
     const needsReencode = outExt !== srcExt;
 
     if (needsReencode) {
-      // Format conversion: re-encode
+      // Format conversion + clip: re-encode
       await ffmpegInstance.run(
-        '-i', inName,
         '-ss', ss,
+        '-i', inName,
         '-t', dur,
         '-map', '0:v:0',
         '-map', '0:a:0?',
@@ -1534,14 +1533,16 @@ document.getElementById('loop-export').addEventListener('click', async e => {
         outName
       );
     } else {
-      // Same format: fast copy
+      // Same format: keyframe-accurate copy, no blank frames
       await ffmpegInstance.run(
-        '-i', inName,
         '-ss', ss,
+        '-i', inName,
         '-t', dur,
         '-map', '0:v:0',
         '-map', '0:a:0?',
         '-c', 'copy',
+        '-copyts',
+        '-start_at_zero',
         '-movflags', '+faststart',
         outName
       );
