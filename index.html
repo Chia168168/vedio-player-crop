@@ -1816,14 +1816,18 @@ window.addEventListener('load', () => {
           showToast('請選擇同一支影片：' + p.fileName); return;
         }
         // Restore state and auto-export
-        loopIn = p.loopIn;
-        loopOut = p.loopOut;
-        document.getElementById('export-format').value = p.format || 'original';
         loadVideoFile(file);
-        // Wait for video to load then auto-trigger export
+        // Restore loop points AFTER loadVideoFile's resetLoop() runs
         video.addEventListener('canplay', async function once() {
           video.removeEventListener('canplay', once);
-          await new Promise(r => setTimeout(r, 800));
+          // Re-apply saved IN/OUT (resetLoop cleared them)
+          loopIn = p.loopIn;
+          loopOut = p.loopOut;
+          loopSetInBtn.classList.add('set');
+          loopSetOutBtn.classList.add('set');
+          updateLoopOverlay();
+          document.getElementById('export-format').value = p.format || 'original';
+          await new Promise(r => setTimeout(r, 500));
           window._resumeSkipSizeCheck = true;
           document.getElementById('loop-export').click();
         }, { once: true });
