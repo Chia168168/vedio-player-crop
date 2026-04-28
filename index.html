@@ -1471,11 +1471,42 @@ document.getElementById('loop-export').addEventListener('click', async e => {
   }
   if (!currentFile) { showToast('沒有影片檔案'); return; }
 
+  savePendingClip(); // save before any checks so resume works even if blocked
+
   const isIOS = /iP(hone|ad|od)/.test(navigator.userAgent);
   const sizeMB = currentFile.size / 1024 / 1024;
   const limitMB = isIOS ? 200 : 800;
   if (sizeMB > limitMB && !window._resumeSkipSizeCheck) {
-    showToast(`檔案 ${sizeMB.toFixed(0)}MB 太大。${isIOS ? 'iOS 建議先轉 MP4 再用電腦剪輯' : '建議 800MB 以下'}`);
+    const confirmEl = document.createElement('div');
+    confirmEl.style.cssText = `
+      position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,0.88);
+      display:flex;flex-direction:column;align-items:center;justify-content:center;
+      gap:14px;font-family:'DM Mono',monospace;text-align:center;padding:24px;
+    `;
+    confirmEl.innerHTML = `
+      <div style="color:var(--accent);font-size:14px">⚠ 檔案較大</div>
+      <div style="color:rgba(255,255,255,0.7);font-size:12px;line-height:1.9">
+        ${sizeMB.toFixed(0)}MB${isIOS ? '，iOS 可能記憶體不足而中斷' : ''}<br>
+        中斷後重新載入頁面，會出現<br>「恢復剪輯」提示可繼續
+      </div>
+      <div style="display:flex;gap:10px;margin-top:4px">
+        <button id="size-try" style="background:transparent;border:1.5px solid rgba(200,255,71,0.5);
+          border-radius:100px;padding:8px 18px;color:var(--accent);
+          font-family:'DM Mono',monospace;font-size:12px;cursor:pointer;">仍然嘗試</button>
+        <button id="size-cancel" style="background:transparent;border:1.5px solid rgba(255,255,255,0.2);
+          border-radius:100px;padding:8px 18px;color:rgba(255,255,255,0.5);
+          font-family:'DM Mono',monospace;font-size:12px;cursor:pointer;">取消</button>
+      </div>
+    `;
+    document.body.appendChild(confirmEl);
+    confirmEl.querySelector('#size-cancel').onclick = () => {
+      clearPendingClip(); confirmEl.remove();
+    };
+    confirmEl.querySelector('#size-try').onclick = () => {
+      confirmEl.remove();
+      window._resumeSkipSizeCheck = true;
+      document.getElementById('loop-export').click();
+    };
     return;
   }
   window._resumeSkipSizeCheck = false;
@@ -1484,7 +1515,6 @@ document.getElementById('loop-export').addEventListener('click', async e => {
   exportOverlay.classList.add('show');
   exportStatus.textContent = '準備中…';
   exportProgressF.style.width = '0%';
-  savePendingClip();
 
   try {
     const { createFFmpeg, fetchFile } = FFmpeg;
