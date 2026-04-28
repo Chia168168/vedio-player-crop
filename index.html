@@ -431,7 +431,7 @@
 
   #loop-range-display {
     flex: 1; font-family: 'DM Mono', monospace; font-size: 10px;
-    color: rgba(255,255,255,0.35); text-align: left; white-space: nowrap;
+    color: rgba(255,255,255,0.35); text-align: right; white-space: nowrap;
     overflow: hidden; text-overflow: ellipsis;
   }
 
@@ -524,11 +524,11 @@
     <div id="speed-row">
       <div class="speed-label">速度</div>
       <div class="speed-btns">
-        <button class="speed-btn" data-speed="0.1">0.1</button>
-        <button class="speed-btn" data-speed="0.5">0.5</button>
-        <button class="speed-btn active" data-speed="1">1</button>
-        <button class="speed-btn" data-speed="2">2</button>
-        <button class="speed-btn" data-speed="frame">Frame</button>
+        <button class="speed-btn" data-speed="0.1">× 0.1</button>
+        <button class="speed-btn" data-speed="0.5">× 0.5</button>
+        <button class="speed-btn active" data-speed="1">× 1</button>
+        <button class="speed-btn" data-speed="2">× 2</button>
+        <button class="speed-btn" data-speed="frame">1 Frame/s</button>
       </div>
       <button id="change-video-btn" style="
         flex-shrink:0;margin-left:8px;padding:5px 11px;
@@ -583,7 +583,7 @@
 
     <div id="timeline-section">
       <div class="timeline-label">
-        <span id="loop-range-display">—</span>
+        <span>時間軸</span>
         <span id="total-time-label">—</span>
       </div>
       <div id="progress-bar-wrap"><div id="progress-fill"></div></div>
@@ -599,14 +599,15 @@
       <button id="loop-set-in">IN</button>
       <button id="loop-set-out">OUT</button>
       <button id="loop-clear">✕</button>
-      <button id="loop-toggle">⟲</button>
+      <button id="loop-toggle">⟲ 循環</button>
       <select id="export-format">
         <option value="original">原格式</option>
         <option value="mp4">MP4</option>
         <option value="mov">MOV</option>
       </select>
-      <button id="loop-export">✂</button>
-      <button id="loop-convert">⇄</button>
+      <button id="loop-export">✂ 剪輯</button>
+      <button id="loop-convert">⇄ 轉檔</button>
+      <div id="loop-range-display">—</div>
     </div>
   </div>
 </div>
@@ -1470,10 +1471,20 @@ document.getElementById('loop-export').addEventListener('click', async e => {
   }
   if (!currentFile) { showToast('沒有影片檔案'); return; }
 
+  // Warn if file too large for WASM memory
+  const isIOS = /iP(hone|ad|od)/.test(navigator.userAgent);
+  const sizeMB = currentFile.size / 1024 / 1024;
+  const limitMB = isIOS ? 200 : 800;
+  if (sizeMB > limitMB) {
+    showToast(`檔案 ${sizeMB.toFixed(0)}MB 太大\n${isIOS ? 'iOS 建議先轉 MP4 再用電腦剪輯' : '建議 800MB 以下'}`);
+    return;
+  }
+
   exportCancelled = false;
   exportOverlay.classList.add('show');
   exportStatus.textContent = '準備中…';
   exportProgressF.style.width = '0%';
+  savePendingClip();
 
   try {
     const { createFFmpeg, fetchFile } = FFmpeg;
@@ -1571,6 +1582,7 @@ document.getElementById('loop-export').addEventListener('click', async e => {
     exportStatus.textContent = '完成！';
     setTimeout(() => exportOverlay.classList.remove('show'), 1500);
     showToast('剪輯完成');
+    clearPendingClip();
 
   } catch(err) {
     exportOverlay.classList.remove('show');
@@ -1619,6 +1631,14 @@ document.getElementById('loop-convert').addEventListener('click', async e => {
   }
 
   // Other format conversions: use FFmpeg
+  const sizeMB2 = currentFile.size / 1024 / 1024;
+  const isIOS2 = /iP(hone|ad|od)/.test(navigator.userAgent);
+  const limitMB2 = isIOS2 ? 200 : 800;
+  if (sizeMB2 > limitMB2) {
+    showToast(`檔案 ${sizeMB2.toFixed(0)}MB 太大，${isIOS2 ? 'iOS 建議 200MB 以下' : '建議 800MB 以下'}`);
+    return;
+  }
+
   exportCancelled = false;
   exportOverlay.classList.add('show');
   exportStatus.textContent = '準備中…';
@@ -1682,10 +1702,105 @@ document.getElementById('loop-convert').addEventListener('click', async e => {
     exportStatus.textContent = '完成！';
     setTimeout(() => exportOverlay.classList.remove('show'), 1500);
     showToast(`轉換完成 → ${outExt.toUpperCase()}`);
+    localStorage.removeItem('pendingClip');
 
   } catch(err) {
     exportOverlay.classList.remove('show');
     showToast('轉換失敗：' + (err.message || err));
+  }
+});
+
+// ── Pending clip: save before export, clear after, resume on reload ──
+function savePendingClip() {
+  if (loopIn === null || loopOut === null || !currentFile) return;
+  localStorage.setItem('pendingClip', JSON.stringify({
+    loopIn, loopOut,
+    fileName: currentFile.name,
+    fileSize: currentFile.size,
+    format: document.getElementById('export-format').value,
+  }));
+}
+
+function clearPendingClip() {
+  localStorage.removeItem('pendingClip');
+}
+
+// Check for pending clip on load
+window.addEventListener('load', () => {
+  const raw = localStorage.getItem('pendingClip');
+  if (!raw) return;
+  try {
+    const p = JSON.parse(raw);
+
+    // Show resume banner
+    const banner = document.createElement('div');
+    banner.id = 'resume-banner';
+    banner.style.cssText = `
+      position: fixed; bottom: 80px; left: 50%; transform: translateX(-50%);
+      z-index: 99999; background: rgba(10,10,12,0.95);
+      border: 1.5px solid rgba(200,255,71,0.4);
+      border-radius: 14px; padding: 14px 18px; max-width: 320px; width: 90%;
+      font-family: 'DM Mono', monospace; font-size: 12px; color: #fff;
+      text-align: center; line-height: 1.7;
+    `;
+    banner.innerHTML = `
+      <div style="color:var(--accent);font-size:13px;margin-bottom:6px">⚠ 上次剪輯未完成</div>
+      <div style="color:rgba(255,255,255,0.6);margin-bottom:10px">
+        ${p.fileName}<br>
+        IN ${formatTime(p.loopIn)} → OUT ${formatTime(p.loopOut)}
+      </div>
+      <div style="display:flex;gap:8px;justify-content:center">
+        <button id="resume-select" style="
+          background:transparent;border:1.5px solid rgba(200,255,71,0.5);
+          border-radius:100px;padding:6px 14px;color:var(--accent);
+          font-family:'DM Mono',monospace;font-size:12px;cursor:pointer;">
+          重新選擇檔案繼續
+        </button>
+        <button id="resume-cancel" style="
+          background:transparent;border:1.5px solid rgba(255,255,255,0.15);
+          border-radius:100px;padding:6px 14px;color:rgba(255,255,255,0.4);
+          font-family:'DM Mono',monospace;font-size:12px;cursor:pointer;">
+          取消
+        </button>
+      </div>
+    `;
+    document.body.appendChild(banner);
+
+    document.getElementById('resume-cancel').addEventListener('click', () => {
+      clearPendingClip();
+      banner.remove();
+    });
+
+    document.getElementById('resume-select').addEventListener('click', () => {
+      banner.remove();
+      // Create temp file input
+      const inp = document.createElement('input');
+      inp.type = 'file'; inp.accept = 'video/*';
+      inp.style.display = 'none';
+      document.body.appendChild(inp);
+      inp.addEventListener('change', async () => {
+        const file = inp.files[0];
+        inp.remove();
+        if (!file) return;
+        if (file.name !== p.fileName || file.size !== p.fileSize) {
+          showToast('請選擇同一支影片：' + p.fileName); return;
+        }
+        // Restore state and auto-export
+        loopIn = p.loopIn;
+        loopOut = p.loopOut;
+        document.getElementById('export-format').value = p.format || 'original';
+        loadVideoFile(file);
+        // Wait for video to load then auto-trigger export
+        video.addEventListener('canplay', async function once() {
+          video.removeEventListener('canplay', once);
+          await new Promise(r => setTimeout(r, 800));
+          document.getElementById('loop-export').click();
+        }, { once: true });
+      });
+      inp.click();
+    });
+  } catch(e) {
+    clearPendingClip();
   }
 });
 </script>
