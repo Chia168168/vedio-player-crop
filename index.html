@@ -1706,110 +1706,40 @@ document.getElementById('loop-export').addEventListener('click', async e => {
 
   exportCancelled = false;
   exportOverlay.classList.add('show');
-  exportStatus.textContent = '準備中…';
-  exportProgressF.style.width = '0%';
+  exportStatus.textContent = '分析影片結構…';
+  exportProgressF.style.width = '10%';
 
   try {
-    const { createFFmpeg, fetchFile } = FFmpeg;
-
-    if (!ffmpegInstance) {
-      ffmpegInstance = createFFmpeg({
-        log: false,
-        corePath: window.location.origin + '/ffmpeg/ffmpeg-core.js',
-      });
-    }
-
-    if (!ffmpegLoaded) {
-      exportStatus.textContent = '載入 FFmpeg…（首次約需 30 秒）';
-      await ffmpegInstance.load();
-      ffmpegLoaded = true;
-    }
-
-    if (exportCancelled) { exportOverlay.classList.remove('show'); return; }
-
-    ffmpegInstance.setProgress(({ ratio }) => {
-      if (ratio >= 0) exportProgressF.style.width = Math.min(95, Math.round(ratio * 100)) + '%';
-    });
-
-    exportStatus.textContent = '分析影片結構…';
-    exportProgressF.style.width = '3%';
-
-    let inputBlob;
-    try {
-      inputBlob = await extractClipBlob(currentFile, loopIn, loopOut);
-      exportStatus.textContent = `提取 ${(inputBlob.size/1024/1024).toFixed(0)}MB 片段…`;
-    } catch(e) {
-      inputBlob = currentFile;
-      exportStatus.textContent = '寫入檔案…';
-    }
-    exportProgressF.style.width = '8%';
-
-    const ext = currentFile.name.split('.').pop() || 'mp4';
-    const inName = 'input.' + ext;
-    ffmpegInstance.FS('writeFile', inName, await fetchFile(inputBlob));
-
-    if (exportCancelled) { exportOverlay.classList.remove('show'); return; }
-
-    exportStatus.textContent = '剪輯中…';
-    exportProgressF.style.width = '10%';
-
-    const ss  = loopIn.toFixed(3);
-    const dur = (loopOut - loopIn).toFixed(3);
     const formatSel = document.getElementById('export-format').value;
-    const srcExt = ext.toLowerCase();
-    const outExt = formatSel === 'original' ? srcExt
-                 : formatSel;
-    const outName = 'clip.' + outExt;
-    const needsReencode = outExt !== srcExt;
+    const srcExt = (currentFile.name.split('.').pop() || 'mp4').toLowerCase();
+    const outExt = formatSel === 'original' ? srcExt : formatSel;
+    const ss = loopIn.toFixed(3);
+    const base = currentFile.name.replace(/\.[^.]+$/, '') || 'clip';
 
-    if (needsReencode) {
-      // Format conversion + clip: re-encode
-      await ffmpegInstance.run(
-        '-ss', ss,
-        '-i', inName,
-        '-t', dur,
-        '-map', '0:v:0',
-        '-map', '0:a:0?',
-        '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '18',
-        '-c:a', 'aac', '-b:a', '128k',
-        '-movflags', '+faststart',
-        outName
-      );
-    } else {
-      // -ss/-to as input options snap to keyframes; -t as output trims trailing blank
-      const toTime = loopOut.toFixed(3);
-      await ffmpegInstance.run(
-        '-ss', ss,
-        '-to', toTime,
-        '-i', inName,
-        '-t', dur,
-        '-map', '0:v:0',
-        '-map', '0:a:0?',
-        '-c', 'copy',
-        outName
-      );
+    if (outExt !== srcExt) {
+      // Format conversion: still needs FFmpeg, warn user
+      exportOverlay.classList.remove('show');
+      showToast('格式轉換請使用下方 ⇄ 轉檔');
+      clearPendingClip();
+      return;
     }
+
+    exportProgressF.style.width = '30%';
+    exportStatus.textContent = '提取片段…';
+
+    const blob = await extractClipBlob(currentFile, loopIn, loopOut);
 
     if (exportCancelled) { exportOverlay.classList.remove('show'); return; }
 
-    exportStatus.textContent = '輸出中…';
     exportProgressF.style.width = '95%';
+    exportStatus.textContent = `輸出 ${(blob.size/1024/1024).toFixed(0)}MB…`;
 
-    const mimeType = outExt === 'mov' ? 'video/quicktime'
-                   : outExt === 'mp4' ? 'video/mp4'
-                   : 'video/' + outExt;
-    const data = ffmpegInstance.FS('readFile', outName);
-    const blob = new Blob([data.buffer], { type: mimeType });
-    const url  = URL.createObjectURL(blob);
-    const a    = document.createElement('a');
-    const base = currentFile.name.replace(/\.[^.]+$/, '') || 'clip';
+    const url = URL.createObjectURL(blob);
+    const a   = document.createElement('a');
     a.href = url;
     a.download = `${base}_clip_${ss.replace('.','_')}.${outExt}`;
     document.body.appendChild(a); a.click(); document.body.removeChild(a);
     setTimeout(() => URL.revokeObjectURL(url), 3000);
-
-    try { ffmpegInstance.FS('unlink', inName); } catch(e) {}
-    try { ffmpegInstance.FS('unlink', outName); } catch(e) {}
 
     exportProgressF.style.width = '100%';
     exportStatus.textContent = '完成！';
@@ -1820,6 +1750,7 @@ document.getElementById('loop-export').addEventListener('click', async e => {
   } catch(err) {
     exportOverlay.classList.remove('show');
     showToast('剪輯失敗：' + (err.message || err));
+    clearPendingClip();
   }
 });
 
