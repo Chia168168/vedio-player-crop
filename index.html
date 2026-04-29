@@ -1127,6 +1127,237 @@ function readFileSlice(file, start, end) {
   });
 }
 
+// ── Byte-range extraction: only read the bytes needed for the clip ──
+async function extractClipBlob(file, loopIn, loopOut) {
+  const CHUNK = 8 * 1024 * 1024;
+
+  // Find moov and ftyp in head
+  const headBuf = await readFileSlice(file, 0, Math.min(CHUNK, file.size));
+  const headView = new DataView(headBuf);
+  let ftypStart = -1, ftypLen = 0;
+  let moovBuf = null;
+
+  let off = 0;
+  while (off + 8 <= headBuf.byteLength) {
+    const sz = readU32(headView, off);
+    const nm = read4cc(headView, off + 4);
+    if (sz < 8) break;
+    if (nm === 'ftyp') { ftypStart = off; ftypLen = sz; }
+    if (nm === 'moov') { moovBuf = headBuf.slice(off, Math.min(off + sz, headBuf.byteLength)); break; }
+    off += sz;
+  }
+
+  // Try tail if moov not in head
+  if (!moovBuf && file.size > CHUNK) {
+    const tailStart = file.size - CHUNK;
+    const tailBuf = await readFileSlice(file, tailStart, file.size);
+    const tv = new DataView(tailBuf);
+    for (let i = 4; i + 8 <= tailBuf.byteLength; i++) {
+      if (read4cc(tv, i) === 'moov') {
+        const sz = readU32(tv, i - 4);
+        moovBuf = tailBuf.slice(i - 4, Math.min(i - 4 + sz, tailBuf.byteLength));
+        break;
+      }
+    }
+  }
+
+  if (!moovBuf) throw new Error('moov not found');
+
+  // Parse video track tables
+  const track = parseVideoTrackFull(moovBuf);
+  if (!track || !track.stco.length) throw new Error('no video track or stco');
+
+  const { timescale, stts, stsc, stco, stsz, fixedSampleSize } = track;
+  const totalChunks = stco.length;
+
+  // Convert time → sample index
+  function timeToSample(sec) {
+    const target = Math.round(sec * timescale);
+    let sample = 0, t = 0;
+    for (const { count, delta } of stts) {
+      if (delta === 0) { sample += count; continue; }
+      const entryEndTime = t + count * delta;
+      if (entryEndTime > target) return sample + Math.floor((target - t) / delta);
+      t = entryEndTime; sample += count;
+    }
+    return sample;
+  }
+
+  // Expand stsc → samples per chunk array
+  function samplesInChunk(chunkIdx) {
+    let result = 1;
+    for (let i = stsc.length - 1; i >= 0; i--) {
+      if (chunkIdx >= stsc[i].firstChunk - 1) { result = stsc[i].samplesPerChunk; break; }
+    }
+    return result;
+  }
+
+  // Sample → chunk index
+  function sampleToChunk(sampleIdx) {
+    let s = 0;
+    for (let c = 0; c < totalChunks; c++) {
+      const n = samplesInChunk(c);
+      if (s + n > sampleIdx) return c;
+      s += n;
+    }
+    return totalChunks - 1;
+  }
+
+  // Size of a chunk in bytes
+  function chunkByteSize(chunkIdx) {
+    if (fixedSampleSize > 0) return fixedSampleSize * samplesInChunk(chunkIdx);
+    let s = 0, cumSamples = 0;
+    for (let c = 0; c < chunkIdx; c++) cumSamples += samplesInChunk(c);
+    const n = samplesInChunk(chunkIdx);
+    for (let i = 0; i < n; i++) cumSamples + i < stsz.length ? s += stsz[cumSamples + i] : 0;
+    return s;
+  }
+
+  const startChunk = Math.max(0, sampleToChunk(timeToSample(loopIn)));
+  const endChunk   = Math.min(totalChunks - 1, sampleToChunk(timeToSample(loopOut)));
+
+  const startByte = stco[startChunk];
+  let endByte;
+  if (endChunk + 1 < totalChunks) {
+    endByte = stco[endChunk + 1];
+  } else {
+    endByte = stco[endChunk] + chunkByteSize(endChunk);
+  }
+  endByte = Math.min(endByte, file.size);
+
+  // Read only the clip bytes
+  const clipBuf = await readFileSlice(file, startByte, endByte);
+  const clipSize = endByte - startByte;
+
+  // Patch moov: adjust stco offsets so they point into the new file
+  // New layout: [ftyp][moov][mdat_header(8)][clip_bytes]
+  const ftypSize = ftypLen;
+  const moovSize = moovBuf.byteLength;
+  const newMoovBuf = patchStcoInMoov(moovBuf, startByte, ftypSize + moovSize + 8);
+
+  // mdat header
+  const mdatHdr = new ArrayBuffer(8);
+  const mdatView = new DataView(mdatHdr);
+  mdatView.setUint32(0, clipSize + 8, false);
+  mdatView.setUint8(4, 0x6D); mdatView.setUint8(5, 0x64);
+  mdatView.setUint8(6, 0x61); mdatView.setUint8(7, 0x74);
+
+  const parts = [];
+  if (ftypStart >= 0) parts.push(headBuf.slice(ftypStart, ftypStart + ftypLen));
+  parts.push(newMoovBuf);
+  parts.push(mdatHdr);
+  parts.push(clipBuf);
+
+  const mime = file.type || (file.name.toLowerCase().endsWith('.mov') ? 'video/quicktime' : 'video/mp4');
+  return new Blob(parts, { type: mime });
+}
+
+function parseVideoTrackFull(moovBuf) {
+  const view = new DataView(moovBuf);
+  let off = 8;
+  while (off + 8 <= moovBuf.byteLength) {
+    const sz = readU32(view, off);
+    const nm = read4cc(view, off + 4);
+    if (sz < 8) break;
+    if (nm === 'trak') {
+      const t = parseTrakFull(view, off + 8, Math.min(off + sz, moovBuf.byteLength));
+      if (t && t.isVideo) return t;
+    }
+    off += sz;
+  }
+  return null;
+}
+
+function parseTrakFull(view, start, end) {
+  let timescale = null, isVideo = false;
+  let stts = [], stsc = [], stco = [], stsz = [], fixedSampleSize = 0;
+
+  function walk(s, e) {
+    let off = s;
+    while (off + 8 <= e) {
+      const sz = readU32(view, off);
+      const nm = read4cc(view, off + 4);
+      if (sz < 8) break;
+      const cs = off + 8, ce = Math.min(off + sz, e);
+      if (['mdia','minf','stbl'].includes(nm)) { walk(cs, ce); }
+      else if (nm === 'mdhd') { timescale = parseMdhd(view, cs, ce); }
+      else if (nm === 'hdlr') { if (parseHdlr(view, cs, ce)) isVideo = true; }
+      else if (nm === 'stts') {
+        const cnt = readU32(view, cs + 4);
+        for (let i = 0; i < cnt && cs + 8 + i * 8 + 7 < ce; i++)
+          stts.push({ count: readU32(view, cs + 8 + i * 8), delta: readU32(view, cs + 8 + i * 8 + 4) });
+      }
+      else if (nm === 'stsc') {
+        const cnt = readU32(view, cs + 4);
+        for (let i = 0; i < cnt && cs + 8 + i * 12 + 11 < ce; i++)
+          stsc.push({ firstChunk: readU32(view, cs + 8 + i * 12), samplesPerChunk: readU32(view, cs + 8 + i * 12 + 4) });
+      }
+      else if (nm === 'stco') {
+        const cnt = readU32(view, cs + 4);
+        for (let i = 0; i < cnt && cs + 8 + i * 4 + 3 < ce; i++)
+          stco.push(readU32(view, cs + 8 + i * 4));
+      }
+      else if (nm === 'co64') {
+        const cnt = readU32(view, cs + 4);
+        for (let i = 0; i < cnt && cs + 8 + i * 8 + 7 < ce; i++)
+          stco.push(readU32(view, cs + 8 + i * 8) * 0x100000000 + readU32(view, cs + 8 + i * 8 + 4));
+      }
+      else if (nm === 'stsz') {
+        fixedSampleSize = readU32(view, cs + 4);
+        if (!fixedSampleSize) {
+          const cnt = readU32(view, cs + 8);
+          for (let i = 0; i < cnt && cs + 12 + i * 4 + 3 < ce; i++)
+            stsz.push(readU32(view, cs + 12 + i * 4));
+        }
+      }
+      off += sz;
+    }
+  }
+  walk(start, end);
+  if (!isVideo || !timescale) return null;
+  return { timescale, stts, stsc, stco, stsz, fixedSampleSize, isVideo };
+}
+
+function patchStcoInMoov(moovBuf, originalStartByte, newMdatStart) {
+  const buf = moovBuf.slice(0);
+  const view = new DataView(buf);
+  const adjustment = newMdatStart - originalStartByte;
+
+  function walk(s, e) {
+    let off = s;
+    while (off + 8 <= e) {
+      const sz = readU32(view, off);
+      const nm = read4cc(view, off + 4);
+      if (sz < 8) break;
+      const ce = Math.min(off + sz, e);
+      if (['trak','mdia','minf','stbl'].includes(nm)) { walk(off + 8, ce); }
+      else if (nm === 'stco') {
+        const cnt = readU32(view, off + 12);
+        for (let i = 0; i < cnt; i++) {
+          const p = off + 16 + i * 4;
+          if (p + 4 > buf.byteLength) break;
+          const oldVal = readU32(view, p);
+          view.setUint32(p, Math.max(0, oldVal + adjustment), false);
+        }
+      }
+      else if (nm === 'co64') {
+        const cnt = readU32(view, off + 12);
+        for (let i = 0; i < cnt; i++) {
+          const p = off + 16 + i * 8;
+          if (p + 8 > buf.byteLength) break;
+          const hi = readU32(view, p), lo = readU32(view, p + 4);
+          const newVal = hi * 0x100000000 + lo + adjustment;
+          view.setUint32(p,     Math.floor(newVal / 0x100000000) >>> 0, false);
+          view.setUint32(p + 4, newVal >>> 0, false);
+        }
+      }
+      off += sz;
+    }
+  }
+  walk(8, buf.byteLength);
+  return buf;
+}
+
 function seekExact(t) {
   return new Promise(resolve => {
     const clamped = Math.max(0, Math.min(duration - 0.001, t));
@@ -1471,45 +1702,7 @@ document.getElementById('loop-export').addEventListener('click', async e => {
   }
   if (!currentFile) { showToast('沒有影片檔案'); return; }
 
-  savePendingClip(); // save before any checks so resume works even if blocked
-
-  const isIOS = /iP(hone|ad|od)/.test(navigator.userAgent);
-  const sizeMB = currentFile.size / 1024 / 1024;
-  const limitMB = isIOS ? 200 : 800;
-  if (sizeMB > limitMB && !window._resumeSkipSizeCheck) {
-    const confirmEl = document.createElement('div');
-    confirmEl.style.cssText = `
-      position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,0.88);
-      display:flex;flex-direction:column;align-items:center;justify-content:center;
-      gap:14px;font-family:'DM Mono',monospace;text-align:center;padding:24px;
-    `;
-    confirmEl.innerHTML = `
-      <div style="color:var(--accent);font-size:14px">⚠ 檔案較大</div>
-      <div style="color:rgba(255,255,255,0.7);font-size:12px;line-height:1.9">
-        ${sizeMB.toFixed(0)}MB${isIOS ? '，iOS 可能記憶體不足而中斷' : ''}<br>
-        中斷後重新載入頁面，會出現<br>「恢復剪輯」提示可繼續
-      </div>
-      <div style="display:flex;gap:10px;margin-top:4px">
-        <button id="size-try" style="background:transparent;border:1.5px solid rgba(200,255,71,0.5);
-          border-radius:100px;padding:8px 18px;color:var(--accent);
-          font-family:'DM Mono',monospace;font-size:12px;cursor:pointer;">仍然嘗試</button>
-        <button id="size-cancel" style="background:transparent;border:1.5px solid rgba(255,255,255,0.2);
-          border-radius:100px;padding:8px 18px;color:rgba(255,255,255,0.5);
-          font-family:'DM Mono',monospace;font-size:12px;cursor:pointer;">取消</button>
-      </div>
-    `;
-    document.body.appendChild(confirmEl);
-    confirmEl.querySelector('#size-cancel').onclick = () => {
-      clearPendingClip(); confirmEl.remove();
-    };
-    confirmEl.querySelector('#size-try').onclick = () => {
-      confirmEl.remove();
-      window._resumeSkipSizeCheck = true;
-      document.getElementById('loop-export').click();
-    };
-    return;
-  }
-  window._resumeSkipSizeCheck = false;
+  savePendingClip();
 
   exportCancelled = false;
   exportOverlay.classList.add('show');
@@ -1538,12 +1731,22 @@ document.getElementById('loop-export').addEventListener('click', async e => {
       if (ratio >= 0) exportProgressF.style.width = Math.min(95, Math.round(ratio * 100)) + '%';
     });
 
-    exportStatus.textContent = '寫入檔案…';
-    exportProgressF.style.width = '5%';
+    exportStatus.textContent = '分析影片結構…';
+    exportProgressF.style.width = '3%';
+
+    let inputBlob;
+    try {
+      inputBlob = await extractClipBlob(currentFile, loopIn, loopOut);
+      exportStatus.textContent = `提取 ${(inputBlob.size/1024/1024).toFixed(0)}MB 片段…`;
+    } catch(e) {
+      inputBlob = currentFile;
+      exportStatus.textContent = '寫入檔案…';
+    }
+    exportProgressF.style.width = '8%';
 
     const ext = currentFile.name.split('.').pop() || 'mp4';
     const inName = 'input.' + ext;
-    ffmpegInstance.FS('writeFile', inName, await fetchFile(currentFile));
+    ffmpegInstance.FS('writeFile', inName, await fetchFile(inputBlob));
 
     if (exportCancelled) { exportOverlay.classList.remove('show'); return; }
 
@@ -1743,11 +1946,14 @@ document.getElementById('loop-convert').addEventListener('click', async e => {
 // ── Pending clip: save before export, clear after, resume on reload ──
 function savePendingClip() {
   if (loopIn === null || loopOut === null || !currentFile) return;
+  const existing = JSON.parse(localStorage.getItem('pendingClip') || '{}');
+  const crashCount = (existing.crashCount || 0) + 1;
   localStorage.setItem('pendingClip', JSON.stringify({
     loopIn, loopOut,
     fileName: currentFile.name,
     fileSize: currentFile.size,
     format: document.getElementById('export-format').value,
+    crashCount,
   }));
 }
 
@@ -1761,8 +1967,11 @@ window.addEventListener('load', () => {
   if (!raw) return;
   try {
     const p = JSON.parse(raw);
+    const crashCount = p.crashCount || 1;
 
-    // Show resume banner
+    // If crashed too many times, show warning instead of auto-retry option
+    const tooManyCrashes = crashCount >= 2;
+
     const banner = document.createElement('div');
     banner.id = 'resume-banner';
     banner.style.cssText = `
@@ -1774,23 +1983,26 @@ window.addEventListener('load', () => {
       text-align: center; line-height: 1.7;
     `;
     banner.innerHTML = `
-      <div style="color:var(--accent);font-size:13px;margin-bottom:6px">⚠ 上次剪輯未完成</div>
+      <div style="color:var(--accent);font-size:13px;margin-bottom:6px">
+        ${tooManyCrashes ? '⚠ 多次中斷，建議改用電腦' : '⚠ 上次剪輯未完成'}
+      </div>
       <div style="color:rgba(255,255,255,0.6);margin-bottom:10px">
         ${p.fileName}<br>
-        IN ${formatTime(p.loopIn)} → OUT ${formatTime(p.loopOut)}
+        IN ${formatTime(p.loopIn)} → OUT ${formatTime(p.loopOut)}<br>
+        ${tooManyCrashes ? `<span style="color:rgba(255,100,100,0.8)">已中斷 ${crashCount} 次，檔案可能太大</span>` : ''}
       </div>
-      <div style="display:flex;gap:8px;justify-content:center">
-        <button id="resume-select" style="
+      <div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap">
+        ${!tooManyCrashes ? `<button id="resume-select" style="
           background:transparent;border:1.5px solid rgba(200,255,71,0.5);
           border-radius:100px;padding:6px 14px;color:var(--accent);
           font-family:'DM Mono',monospace;font-size:12px;cursor:pointer;">
-          重新選擇檔案繼續
-        </button>
+          重新選擇繼續
+        </button>` : ''}
         <button id="resume-cancel" style="
           background:transparent;border:1.5px solid rgba(255,255,255,0.15);
           border-radius:100px;padding:6px 14px;color:rgba(255,255,255,0.4);
           font-family:'DM Mono',monospace;font-size:12px;cursor:pointer;">
-          取消
+          ${tooManyCrashes ? '清除記錄' : '取消'}
         </button>
       </div>
     `;
@@ -1801,39 +2013,37 @@ window.addEventListener('load', () => {
       banner.remove();
     });
 
-    document.getElementById('resume-select').addEventListener('click', () => {
-      banner.remove();
-      // Create temp file input
-      const inp = document.createElement('input');
-      inp.type = 'file'; inp.accept = 'video/*';
-      inp.style.display = 'none';
-      document.body.appendChild(inp);
-      inp.addEventListener('change', async () => {
-        const file = inp.files[0];
-        inp.remove();
-        if (!file) return;
-        if (file.name !== p.fileName || file.size !== p.fileSize) {
-          showToast('請選擇同一支影片：' + p.fileName); return;
-        }
-        // Restore state and auto-export
-        loadVideoFile(file);
-        // Restore loop points AFTER loadVideoFile's resetLoop() runs
-        video.addEventListener('canplay', async function once() {
-          video.removeEventListener('canplay', once);
-          // Re-apply saved IN/OUT (resetLoop cleared them)
-          loopIn = p.loopIn;
-          loopOut = p.loopOut;
-          loopSetInBtn.classList.add('set');
-          loopSetOutBtn.classList.add('set');
-          updateLoopOverlay();
-          document.getElementById('export-format').value = p.format || 'original';
-          await new Promise(r => setTimeout(r, 500));
-          window._resumeSkipSizeCheck = true;
-          document.getElementById('loop-export').click();
-        }, { once: true });
+    if (!tooManyCrashes) {
+      document.getElementById('resume-select').addEventListener('click', () => {
+        banner.remove();
+        const inp = document.createElement('input');
+        inp.type = 'file'; inp.accept = 'video/*';
+        inp.style.display = 'none';
+        document.body.appendChild(inp);
+        inp.addEventListener('change', async () => {
+          const file = inp.files[0];
+          inp.remove();
+          if (!file) return;
+          if (file.name !== p.fileName || file.size !== p.fileSize) {
+            showToast('請選擇同一支影片：' + p.fileName); return;
+          }
+          loadVideoFile(file);
+          video.addEventListener('canplay', async function once() {
+            video.removeEventListener('canplay', once);
+            loopIn = p.loopIn;
+            loopOut = p.loopOut;
+            loopSetInBtn.classList.add('set');
+            loopSetOutBtn.classList.add('set');
+            updateLoopOverlay();
+            document.getElementById('export-format').value = p.format || 'original';
+            await new Promise(r => setTimeout(r, 500));
+            window._resumeSkipSizeCheck = true;
+            document.getElementById('loop-export').click();
+          }, { once: true });
+        });
+        inp.click();
       });
-      inp.click();
-    });
+    }
   } catch(e) {
     clearPendingClip();
   }
