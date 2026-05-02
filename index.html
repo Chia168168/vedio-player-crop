@@ -1,4 +1,5 @@
 <!DOCTYPE html>
+
 <html lang="zh-TW">
 <head>
 <meta charset="UTF-8">
@@ -12,459 +13,461 @@
 <style>
   @import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@300;400;500&family=Space+Grotesk:wght@300;400;600&display=swap');
 
-  * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+- { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
 
-  :root {
-    --accent: #c8ff47;
-    --accent2: #47d4ff;
-    --text: #f0f0f4;
-    --muted: #888899;
-  }
+:root {
+–accent: #c8ff47;
+–accent2: #47d4ff;
+–text: #f0f0f4;
+–muted: #888899;
+}
 
-  html, body {
-    background: #000;
-    color: var(--text);
-    font-family: 'Space Grotesk', sans-serif;
-    height: 100%;
-    overflow: hidden;
-    position: fixed;
-    width: 100%;
-  }
+html, body {
+background: #000;
+color: var(–text);
+font-family: ‘Space Grotesk’, sans-serif;
+height: 100%;
+overflow: hidden;
+position: fixed;
+width: 100%;
+}
 
-  /* ══ UPLOAD SCREEN ══ */
-  #upload-screen {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    height: 100dvh;
-    gap: 24px;
-    padding: 32px;
-    background: #0a0a0c;
-  }
-  .logo {
-    font-family: 'DM Mono', monospace;
-    font-size: 11px;
-    letter-spacing: 0.3em;
-    color: var(--muted);
-    text-transform: uppercase;
-  }
-  .upload-zone {
-    width: 100%; max-width: 340px;
-    aspect-ratio: 16/10;
-    border: 1.5px dashed rgba(200,255,71,0.3);
-    border-radius: 16px;
-    display: flex; flex-direction: column;
-    align-items: center; justify-content: center;
-    gap: 14px;
-    background: linear-gradient(135deg, rgba(200,255,71,0.03), rgba(71,212,255,0.03));
-    position: relative; overflow: hidden; cursor: pointer;
-    transition: border-color 0.2s, background 0.2s;
-  }
-  .upload-zone:active { border-color: var(--accent); background: rgba(200,255,71,0.07); }
-  .upload-zone::before {
-    content: ''; position: absolute; inset: 0;
-    background: radial-gradient(ellipse at 50% 120%, rgba(200,255,71,0.08) 0%, transparent 60%);
-    pointer-events: none;
-  }
-  .upload-icon {
-    width: 56px; height: 56px; border-radius: 14px;
-    background: rgba(200,255,71,0.1);
-    display: flex; align-items: center; justify-content: center;
-  }
-  .upload-icon svg { width: 28px; height: 28px; stroke: var(--accent); }
-  .upload-text { font-size: 15px; font-weight: 600; }
-  .upload-sub { font-size: 12px; color: var(--muted); font-family: 'DM Mono', monospace; }
-  #file-input {
-    position: absolute; inset: 0; width: 100%; height: 100%;
-    opacity: 0; cursor: pointer; z-index: 10; font-size: 16px;
-  }
+/* ══ UPLOAD SCREEN ══ */
+#upload-screen {
+display: flex;
+flex-direction: column;
+align-items: center;
+justify-content: center;
+height: 100dvh;
+gap: 24px;
+padding: 32px;
+background: #0a0a0c;
+}
+.logo {
+font-family: ‘DM Mono’, monospace;
+font-size: 11px;
+letter-spacing: 0.3em;
+color: var(–muted);
+text-transform: uppercase;
+}
+.upload-zone {
+width: 100%; max-width: 340px;
+aspect-ratio: 16/10;
+border: 1.5px dashed rgba(200,255,71,0.3);
+border-radius: 16px;
+display: flex; flex-direction: column;
+align-items: center; justify-content: center;
+gap: 14px;
+background: linear-gradient(135deg, rgba(200,255,71,0.03), rgba(71,212,255,0.03));
+position: relative; overflow: hidden; cursor: pointer;
+transition: border-color 0.2s, background 0.2s;
+}
+.upload-zone:active { border-color: var(–accent); background: rgba(200,255,71,0.07); }
+.upload-zone::before {
+content: ‘’; position: absolute; inset: 0;
+background: radial-gradient(ellipse at 50% 120%, rgba(200,255,71,0.08) 0%, transparent 60%);
+pointer-events: none;
+}
+.upload-icon {
+width: 56px; height: 56px; border-radius: 14px;
+background: rgba(200,255,71,0.1);
+display: flex; align-items: center; justify-content: center;
+}
+.upload-icon svg { width: 28px; height: 28px; stroke: var(–accent); }
+.upload-text { font-size: 15px; font-weight: 600; }
+.upload-sub { font-size: 12px; color: var(–muted); font-family: ‘DM Mono’, monospace; }
+#file-input {
+position: absolute; inset: 0; width: 100%; height: 100%;
+opacity: 0; cursor: pointer; z-index: 10; font-size: 16px;
+}
 
-  /* ══ PLAYER SCREEN — true fullscreen ══ */
-  #player-screen {
-    display: none;
-    position: fixed; inset: 0;
-    background: #000;
-  }
+/* ══ PLAYER SCREEN — true fullscreen ══ */
+#player-screen {
+display: none;
+position: fixed; inset: 0;
+background: #000;
+}
 
-  #video-container {
-    position: absolute; inset: 0;
-    display: flex; align-items: center; justify-content: center;
-    background: #000;
-    overflow: hidden;
-    touch-action: none;
-  }
-  #video {
-    width: 100%; height: 100%;
-    display: block; object-fit: contain;
-    transform-origin: center center;
-    transition: none;
-    will-change: transform;
-  }
+#video-container {
+position: absolute; inset: 0;
+display: flex; align-items: center; justify-content: center;
+background: #000;
+overflow: hidden;
+touch-action: none;
+}
+#video {
+width: 100%; height: 100%;
+display: block; object-fit: contain;
+transform-origin: center center;
+transition: none;
+will-change: transform;
+}
 
-  /* Tap zone over video */
-  #tap-overlay {
-    position: absolute; inset: 0;
-    z-index: 5; cursor: pointer;
-  }
+/* Tap zone over video */
+#tap-overlay {
+position: absolute; inset: 0;
+z-index: 5; cursor: pointer;
+}
 
-  /* ── Time info top-right ── */
-  #time-overlay {
-    position: absolute;
-    top: max(env(safe-area-inset-top, 0px), 8px);
-    right: 12px;
-    margin-top: 8px;
-    background: transparent;
-    padding: 5px 10px;
-    font-family: 'DM Mono', monospace;
-    font-size: 11px; color: rgba(255,255,255,0.75);
-    letter-spacing: 0.05em;
-    pointer-events: none;
-    line-height: 1.7; text-align: right;
-    z-index: 20;
-    transition: opacity 0.3s;
-  }
-  #time-display { color: rgba(255,255,255,0.85); }
-  #frame-display { color: rgba(255,255,255,0.5); font-size: 10px; }
-  #time-overlay.hidden { opacity: 0; }
+/* ── Time info top-right ── */
+#time-overlay {
+position: absolute;
+top: max(env(safe-area-inset-top, 0px), 8px);
+right: 12px;
+margin-top: 8px;
+background: transparent;
+padding: 5px 10px;
+font-family: ‘DM Mono’, monospace;
+font-size: 11px; color: rgba(255,255,255,0.75);
+letter-spacing: 0.05em;
+pointer-events: none;
+line-height: 1.7; text-align: right;
+z-index: 20;
+transition: opacity 0.3s;
+}
+#time-display { color: rgba(255,255,255,0.85); }
+#frame-display { color: rgba(255,255,255,0.5); font-size: 10px; }
+#time-overlay.hidden { opacity: 0; }
 
-  /* ── Mini bar (visible when panel hidden) ── */
-  #mini-bar {
-    position: absolute;
-    bottom: max(env(safe-area-inset-bottom, 0px), 10px);
-    left: 0; right: 0;
-    z-index: 40;
-    display: none;
-    align-items: center;
-    justify-content: space-around;
-    background: transparent;
-    border: none;
-    padding: 6px 24px;
-  }
-  #mini-bar.show { display: flex; }
+/* ── Mini bar (visible when panel hidden) ── */
+#mini-bar {
+position: absolute;
+bottom: max(env(safe-area-inset-bottom, 0px), 10px);
+left: 0; right: 0;
+z-index: 40;
+display: none;
+align-items: center;
+justify-content: space-around;
+background: transparent;
+border: none;
+padding: 6px 24px;
+}
+#mini-bar.show { display: flex; }
 
-  .mini-btn {
-    background: transparent;
-    border: none;
-    border-radius: 50%;
-    width: 52px; height: 52px;
-    display: flex; align-items: center; justify-content: center;
-    cursor: pointer;
-    flex-shrink: 0;
-    opacity: 0.7;
-  }
-  .mini-btn svg { width: 24px; height: 24px; stroke: #fff; fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
-  .mini-btn:active { opacity: 1; transform: scale(0.88); }
+.mini-btn {
+background: transparent;
+border: none;
+border-radius: 50%;
+width: 52px; height: 52px;
+display: flex; align-items: center; justify-content: center;
+cursor: pointer;
+flex-shrink: 0;
+opacity: 0.7;
+}
+.mini-btn svg { width: 24px; height: 24px; stroke: #fff; fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.mini-btn:active { opacity: 1; transform: scale(0.88); }
 
-  #mini-play-btn { opacity: 0.85; }
-  #mini-play-btn svg { stroke: #fff; width: 28px; height: 28px; }
+#mini-play-btn { opacity: 0.85; }
+#mini-play-btn svg { stroke: #fff; width: 28px; height: 28px; }
 
-  .mini-divider { display: none; }
+.mini-divider { display: none; }
 
-  #mini-expand {
-    opacity: 0.35;
-    font-size: 16px;
-    color: #fff;
-    padding: 0;
-    width: 44px; height: 44px;
-    display: flex; align-items: center; justify-content: center;
-    background: transparent;
-    border: none;
-    cursor: pointer;
-    line-height: 1;
-    flex-shrink: 0;
-  }
+#mini-expand {
+opacity: 0.35;
+font-size: 16px;
+color: #fff;
+padding: 0;
+width: 44px; height: 44px;
+display: flex; align-items: center; justify-content: center;
+background: transparent;
+border: none;
+cursor: pointer;
+line-height: 1;
+flex-shrink: 0;
+}
 
-  /* ══ FLOATING CONTROLS PANEL ══ */
-  #controls {
-    position: absolute; left: 0; right: 0; bottom: 0;
-    z-index: 30;
-    background: transparent;
-    padding-top: 32px;
-    padding-bottom: max(env(safe-area-inset-bottom, 0px), 6px);
-    transition: transform 0.3s cubic-bezier(0.4,0,0.2,1), opacity 0.3s;
-  }
-  #controls.hidden {
-    transform: translateY(100%);
-    opacity: 0;
-    pointer-events: none;
-  }
+/* ══ FLOATING CONTROLS PANEL ══ */
+#controls {
+position: absolute; left: 0; right: 0; bottom: 0;
+z-index: 30;
+background: transparent;
+padding-top: 32px;
+padding-bottom: max(env(safe-area-inset-bottom, 0px), 6px);
+transition: transform 0.3s cubic-bezier(0.4,0,0.2,1), opacity 0.3s;
+}
+#controls.hidden {
+transform: translateY(100%);
+opacity: 0;
+pointer-events: none;
+}
 
-  /* Hide chevron pill at top of panel */
-  #hide-pill {
-    display: flex; justify-content: center;
-    margin-bottom: 2px;
-  }
-  #hide-pill button {
-    background: transparent;
-    border: none; border-radius: 100px;
-    padding: 3px 22px; cursor: pointer;
-    color: rgba(255,255,255,0.38); font-size: 16px; line-height: 1.3;
-  }
+/* Hide chevron pill at top of panel */
+#hide-pill {
+display: flex; justify-content: center;
+margin-bottom: 2px;
+}
+#hide-pill button {
+background: transparent;
+border: none; border-radius: 100px;
+padding: 3px 22px; cursor: pointer;
+color: rgba(255,255,255,0.38); font-size: 16px; line-height: 1.3;
+}
 
-  /* FPS row */
-  #fps-row {
-    display: flex; align-items: center;
-    padding: 6px 12px 8px;
-    border-bottom: none;
-  }
-  .fps-btns {
-    display: flex; gap: 6px; flex: 1;
-    overflow-x: auto; -webkit-overflow-scrolling: touch;
-    scrollbar-width: none;
-  }
-  .fps-btns::-webkit-scrollbar { display: none; }
-  .fps-btn {
-    flex-shrink: 0; padding: 5px 10px;
-    border-radius: 100px; border: 1.5px solid rgba(255,255,255,0.25);
-    background: transparent; color: rgba(255,255,255,0.75);
-    font-family: 'DM Mono', monospace; font-size: 13px;
-    cursor: pointer; transition: all 0.15s; white-space: nowrap;
-  }
-  .fps-btn.active {
-    background: transparent;
-    border-color: var(--accent2);
-    color: var(--accent2); font-weight: 500;
-  }
-  .fps-btn:active { opacity: 0.7; transform: scale(0.95); }
+/* FPS row */
+#fps-row {
+display: flex; align-items: center;
+padding: 6px 12px 8px;
+border-bottom: none;
+}
+.fps-btns {
+display: flex; gap: 6px; flex: 1;
+overflow-x: auto; -webkit-overflow-scrolling: touch;
+scrollbar-width: none;
+}
+.fps-btns::-webkit-scrollbar { display: none; }
+.fps-btn {
+flex-shrink: 0; padding: 5px 10px;
+border-radius: 100px; border: 1.5px solid rgba(255,255,255,0.25);
+background: transparent; color: rgba(255,255,255,0.75);
+font-family: ‘DM Mono’, monospace; font-size: 13px;
+cursor: pointer; transition: all 0.15s; white-space: nowrap;
+}
+.fps-btn.active {
+background: transparent;
+border-color: var(–accent2);
+color: var(–accent2); font-weight: 500;
+}
+.fps-btn:active { opacity: 0.7; transform: scale(0.95); }
 
-  /* Speed row */
-  #speed-row {
-    display: flex; align-items: center;
-    padding: 6px 12px 8px;
-    border-bottom: none;
-  }
-  .speed-label {
-    font-size: 11px; font-family: 'DM Mono', monospace;
-    color: rgba(255,255,255,0.5); letter-spacing: 0.2em;
-    text-transform: uppercase; margin-right: 10px; white-space: nowrap;
-  }
-  .speed-btns {
-    display: flex; gap: 6px; flex: 1;
-    overflow-x: auto; -webkit-overflow-scrolling: touch;
-    scrollbar-width: none;
-  }
-  .speed-btns::-webkit-scrollbar { display: none; }
-  .speed-btn {
-    flex-shrink: 0; padding: 5px 11px;
-    border-radius: 100px; border: 1.5px solid rgba(255,255,255,0.25);
-    background: transparent; color: rgba(255,255,255,0.75);
-    font-family: 'DM Mono', monospace; font-size: 13px;
-    cursor: pointer; transition: all 0.15s; white-space: nowrap;
-  }
-  .speed-btn.active {
-    background: transparent; border-color: var(--accent);
-    color: var(--accent); font-weight: 500;
-  }
-  .speed-btn:active { opacity: 0.7; transform: scale(0.95); }
+/* Speed row */
+#speed-row {
+display: flex; align-items: center;
+padding: 6px 12px 8px;
+border-bottom: none;
+}
+.speed-label {
+font-size: 11px; font-family: ‘DM Mono’, monospace;
+color: rgba(255,255,255,0.5); letter-spacing: 0.2em;
+text-transform: uppercase; margin-right: 10px; white-space: nowrap;
+}
+.speed-btns {
+display: flex; gap: 6px; flex: 1;
+overflow-x: auto; -webkit-overflow-scrolling: touch;
+scrollbar-width: none;
+}
+.speed-btns::-webkit-scrollbar { display: none; }
+.speed-btn {
+flex-shrink: 0; padding: 5px 11px;
+border-radius: 100px; border: 1.5px solid rgba(255,255,255,0.25);
+background: transparent; color: rgba(255,255,255,0.75);
+font-family: ‘DM Mono’, monospace; font-size: 13px;
+cursor: pointer; transition: all 0.15s; white-space: nowrap;
+}
+.speed-btn.active {
+background: transparent; border-color: var(–accent);
+color: var(–accent); font-weight: 500;
+}
+.speed-btn:active { opacity: 0.7; transform: scale(0.95); }
 
-  /* Playback row */
-  #playback-row {
-    display: flex; align-items: center; justify-content: center;
-    gap: 8px; padding: 10px 12px;
-    border-bottom: none;
-  }
-  .ctrl-btn {
-    display: flex; flex-direction: column;
-    align-items: center; justify-content: center;
-    gap: 3px;
-    background: transparent;
-    border: none;
-    border-radius: 12px; padding: 10px 12px;
-    cursor: pointer; transition: all 0.15s;
-    flex: 1; max-width: 72px; min-height: 54px;
-  }
-  .ctrl-btn svg { width: 22px; height: 22px; stroke: rgba(255,255,255,0.85); fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
-  .ctrl-btn span { font-size: 11px; font-family: 'DM Mono', monospace; color: rgba(255,255,255,0.6); letter-spacing: 0.05em; }
-  .ctrl-btn:active { opacity: 0.6; transform: scale(0.95); }
+/* Playback row */
+#playback-row {
+display: flex; align-items: center; justify-content: center;
+gap: 8px; padding: 10px 12px;
+border-bottom: none;
+}
+.ctrl-btn {
+display: flex; flex-direction: column;
+align-items: center; justify-content: center;
+gap: 3px;
+background: transparent;
+border: none;
+border-radius: 12px; padding: 10px 12px;
+cursor: pointer; transition: all 0.15s;
+flex: 1; max-width: 72px; min-height: 54px;
+}
+.ctrl-btn svg { width: 22px; height: 22px; stroke: rgba(255,255,255,0.85); fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.ctrl-btn span { font-size: 11px; font-family: ‘DM Mono’, monospace; color: rgba(255,255,255,0.6); letter-spacing: 0.05em; }
+.ctrl-btn:active { opacity: 0.6; transform: scale(0.95); }
 
-  #play-btn {
-    background: transparent; border: none;
-    max-width: 80px; min-height: 60px;
-  }
-  #play-btn svg { stroke: #fff; width: 28px; height: 28px; }
-  #play-btn span { color: rgba(255,255,255,0.6); font-size: 11px; }
-  #play-btn:active { opacity: 0.7; transform: scale(0.95); }
+#play-btn {
+background: transparent; border: none;
+max-width: 80px; min-height: 60px;
+}
+#play-btn svg { stroke: #fff; width: 28px; height: 28px; }
+#play-btn span { color: rgba(255,255,255,0.6); font-size: 11px; }
+#play-btn:active { opacity: 0.7; transform: scale(0.95); }
 
-  .save-btn svg { stroke: rgba(255,255,255,0.85); }
+.save-btn svg { stroke: rgba(255,255,255,0.85); }
 
-  /* Timeline */
-  #timeline-section {
-    padding: 8px 12px 10px;
-    display: flex; flex-direction: column; gap: 6px;
-  }
-  .timeline-label {
-    font-size: 10px; font-family: 'DM Mono', monospace;
-    color: var(--muted); letter-spacing: 0.15em; text-transform: uppercase;
-    display: flex; justify-content: space-between;
-  }
-  #progress-bar-wrap {
-    position: relative; height: 4px;
-    background: rgba(255,255,255,0.12);
-    border-radius: 2px; cursor: pointer;
-  }
-  #progress-fill {
-    height: 100%; background: var(--accent);
-    border-radius: 2px; width: 0%;
-    transition: width 0.08s linear;
-  }
-  #thumbnail-strip {
-    position: relative; height: 50px;
-    border-radius: 8px; overflow: hidden;
-    background: rgba(255,255,255,0.05);
-    border: 1px solid rgba(255,255,255,0.08);
-    cursor: pointer;
-  }
-  #thumb-canvas-strip {
-    display: flex; height: 100%; width: 100%;
-    position: absolute; top: 0; left: 0;
-  }
-  #thumb-canvas-strip canvas { flex-shrink: 0; height: 100%; object-fit: cover; }
-  #timeline-indicator {
-    position: absolute; top: 0; width: 2px; height: 100%;
-    background: var(--accent); pointer-events: none;
-    box-shadow: 0 0 6px var(--accent); z-index: 10;
-  }
-  #timeline-indicator::before {
-    content: ''; position: absolute; top: -4px; left: 50%;
-    transform: translateX(-50%);
-    width: 10px; height: 10px;
-    background: var(--accent); border-radius: 50%;
-  }
-  .thumb-loading {
-    color: var(--muted); font-size: 11px;
-    font-family: 'DM Mono', monospace; text-align: center; padding: 8px 0 0;
-  }
+/* Timeline */
+#timeline-section {
+padding: 8px 12px 10px;
+display: flex; flex-direction: column; gap: 6px;
+}
+.timeline-label {
+font-size: 10px; font-family: ‘DM Mono’, monospace;
+color: var(–muted); letter-spacing: 0.15em; text-transform: uppercase;
+display: flex; justify-content: space-between;
+}
+#progress-bar-wrap {
+position: relative; height: 4px;
+background: rgba(255,255,255,0.12);
+border-radius: 2px; cursor: pointer;
+}
+#progress-fill {
+height: 100%; background: var(–accent);
+border-radius: 2px; width: 0%;
+transition: width 0.08s linear;
+}
+#thumbnail-strip {
+position: relative; height: 50px;
+border-radius: 8px; overflow: hidden;
+background: rgba(255,255,255,0.05);
+border: 1px solid rgba(255,255,255,0.08);
+cursor: pointer;
+}
+#thumb-canvas-strip {
+display: flex; height: 100%; width: 100%;
+position: absolute; top: 0; left: 0;
+}
+#thumb-canvas-strip canvas { flex-shrink: 0; height: 100%; object-fit: cover; }
+#timeline-indicator {
+position: absolute; top: 0; width: 2px; height: 100%;
+background: var(–accent); pointer-events: none;
+box-shadow: 0 0 6px var(–accent); z-index: 10;
+}
+#timeline-indicator::before {
+content: ‘’; position: absolute; top: -4px; left: 50%;
+transform: translateX(-50%);
+width: 10px; height: 10px;
+background: var(–accent); border-radius: 50%;
+}
+.thumb-loading {
+color: var(–muted); font-size: 11px;
+font-family: ‘DM Mono’, monospace; text-align: center; padding: 8px 0 0;
+}
 
-  /* Loop range */
-  #loop-row {
-    display: flex; align-items: center; gap: 8px;
-    padding: 4px 12px 8px;
-  }
-  #loop-toggle {
-    background: transparent; border: 1.5px solid rgba(255,255,255,0.2);
-    border-radius: 100px; padding: 5px 12px;
-    color: rgba(255,255,255,0.5); font-family: 'DM Mono', monospace;
-    font-size: 12px; cursor: pointer; white-space: nowrap; flex-shrink: 0;
-    transition: all 0.15s;
-  }
-  #loop-toggle.active {
-    border-color: var(--accent2); color: var(--accent2);
-  }
-  #loop-set-in, #loop-set-out {
-    background: transparent; border: 1.5px solid rgba(255,255,255,0.2);
-    border-radius: 100px; padding: 5px 10px;
-    color: rgba(255,255,255,0.5); font-family: 'DM Mono', monospace;
-    font-size: 12px; cursor: pointer; white-space: nowrap; flex-shrink: 0;
-    transition: all 0.15s;
-  }
-  #loop-set-in.set { border-color: rgba(200,255,71,0.5); color: var(--accent); }
-  #loop-set-out.set { border-color: rgba(200,255,71,0.5); color: var(--accent); }
-  #loop-set-in:active, #loop-set-out:active, #loop-toggle:active, #loop-clear:active { opacity: 0.6; }
+/* Loop range */
+#loop-row {
+display: flex; align-items: center; gap: 8px;
+padding: 4px 12px 8px;
+}
+#loop-toggle {
+background: transparent; border: 1.5px solid rgba(255,255,255,0.2);
+border-radius: 100px; padding: 5px 12px;
+color: rgba(255,255,255,0.5); font-family: ‘DM Mono’, monospace;
+font-size: 12px; cursor: pointer; white-space: nowrap; flex-shrink: 0;
+transition: all 0.15s;
+}
+#loop-toggle.active {
+border-color: var(–accent2); color: var(–accent2);
+}
+#loop-set-in, #loop-set-out {
+background: transparent; border: 1.5px solid rgba(255,255,255,0.2);
+border-radius: 100px; padding: 5px 10px;
+color: rgba(255,255,255,0.5); font-family: ‘DM Mono’, monospace;
+font-size: 12px; cursor: pointer; white-space: nowrap; flex-shrink: 0;
+transition: all 0.15s;
+}
+#loop-set-in.set { border-color: rgba(200,255,71,0.5); color: var(–accent); }
+#loop-set-out.set { border-color: rgba(200,255,71,0.5); color: var(–accent); }
+#loop-set-in:active, #loop-set-out:active, #loop-toggle:active, #loop-clear:active { opacity: 0.6; }
 
-  #loop-clear {
-    background: transparent; border: 1.5px solid rgba(255,255,255,0.2);
-    border-radius: 100px; padding: 5px 10px;
-    color: rgba(255,255,255,0.4); font-family: 'DM Mono', monospace;
-    font-size: 12px; cursor: pointer; white-space: nowrap; flex-shrink: 0;
-    transition: all 0.15s;
-  }
+#loop-clear {
+background: transparent; border: 1.5px solid rgba(255,255,255,0.2);
+border-radius: 100px; padding: 5px 10px;
+color: rgba(255,255,255,0.4); font-family: ‘DM Mono’, monospace;
+font-size: 12px; cursor: pointer; white-space: nowrap; flex-shrink: 0;
+transition: all 0.15s;
+}
 
-  #loop-export {
-    background: transparent; border: 1.5px solid rgba(200,255,71,0.3);
-    border-radius: 100px; padding: 5px 11px;
-    color: var(--accent); font-family: 'DM Mono', monospace;
-    font-size: 12px; cursor: pointer; white-space: nowrap; flex-shrink: 0;
-    transition: all 0.15s;
-  }
-  #loop-export:active { opacity: 0.6; }
-  #loop-export:disabled { opacity: 0.3; cursor: not-allowed; }
+#loop-export {
+background: transparent; border: 1.5px solid rgba(200,255,71,0.3);
+border-radius: 100px; padding: 5px 11px;
+color: var(–accent); font-family: ‘DM Mono’, monospace;
+font-size: 12px; cursor: pointer; white-space: nowrap; flex-shrink: 0;
+transition: all 0.15s;
+}
+#loop-export:active { opacity: 0.6; }
+#loop-export:disabled { opacity: 0.3; cursor: not-allowed; }
 
-  #loop-convert {
-    background: transparent; border: 1.5px solid rgba(71,212,255,0.3);
-    border-radius: 100px; padding: 5px 11px;
-    color: var(--accent2); font-family: 'DM Mono', monospace;
-    font-size: 12px; cursor: pointer; white-space: nowrap; flex-shrink: 0;
-    transition: all 0.15s;
-  }
-  #loop-convert:active { opacity: 0.6; }
+#loop-convert {
+background: transparent; border: 1.5px solid rgba(71,212,255,0.3);
+border-radius: 100px; padding: 5px 11px;
+color: var(–accent2); font-family: ‘DM Mono’, monospace;
+font-size: 12px; cursor: pointer; white-space: nowrap; flex-shrink: 0;
+transition: all 0.15s;
+}
+#loop-convert:active { opacity: 0.6; }
 
-  #export-format {
-    background: transparent; border: 1.5px solid rgba(255,255,255,0.2);
-    border-radius: 100px; padding: 5px 8px;
-    color: rgba(255,255,255,0.6); font-family: 'DM Mono', monospace;
-    font-size: 12px; cursor: pointer; flex-shrink: 0;
-    -webkit-appearance: none; appearance: none;
-    text-align: center;
-  }
-  #export-format option { background: #1a1a1a; color: #fff; }
+#export-format {
+background: transparent; border: 1.5px solid rgba(255,255,255,0.2);
+border-radius: 100px; padding: 5px 8px;
+color: rgba(255,255,255,0.6); font-family: ‘DM Mono’, monospace;
+font-size: 12px; cursor: pointer; flex-shrink: 0;
+-webkit-appearance: none; appearance: none;
+text-align: center;
+}
+#export-format option { background: #1a1a1a; color: #fff; }
 
-  /* Export progress overlay */
-  #export-overlay {
-    display: none;
-    position: fixed; inset: 0; z-index: 99999;
-    background: rgba(0,0,0,0.85);
-    flex-direction: column; align-items: center; justify-content: center;
-    gap: 16px;
-  }
-  #export-overlay.show { display: flex; }
-  #export-overlay p {
-    color: #fff; font-family: 'DM Mono', monospace;
-    font-size: 14px; text-align: center; line-height: 1.6;
-    padding: 0 24px;
-  }
-  #export-progress-bar {
-    width: 240px; height: 6px;
-    background: rgba(255,255,255,0.15); border-radius: 3px; overflow: hidden;
-  }
-  #export-progress-fill {
-    height: 100%; background: var(--accent);
-    border-radius: 3px; width: 0%;
-    transition: width 0.3s;
-  }
-  #export-cancel {
-    background: transparent; border: 1.5px solid rgba(255,255,255,0.25);
-    border-radius: 100px; padding: 7px 20px;
-    color: rgba(255,255,255,0.6); font-family: 'DM Mono', monospace;
-    font-size: 13px; cursor: pointer;
-  }
+/* Export progress overlay */
+#export-overlay {
+display: none;
+position: fixed; inset: 0; z-index: 99999;
+background: rgba(0,0,0,0.85);
+flex-direction: column; align-items: center; justify-content: center;
+gap: 16px;
+}
+#export-overlay.show { display: flex; }
+#export-overlay p {
+color: #fff; font-family: ‘DM Mono’, monospace;
+font-size: 14px; text-align: center; line-height: 1.6;
+padding: 0 24px;
+}
+#export-progress-bar {
+width: 240px; height: 6px;
+background: rgba(255,255,255,0.15); border-radius: 3px; overflow: hidden;
+}
+#export-progress-fill {
+height: 100%; background: var(–accent);
+border-radius: 3px; width: 0%;
+transition: width 0.3s;
+}
+#export-cancel {
+background: transparent; border: 1.5px solid rgba(255,255,255,0.25);
+border-radius: 100px; padding: 7px 20px;
+color: rgba(255,255,255,0.6); font-family: ‘DM Mono’, monospace;
+font-size: 13px; cursor: pointer;
+}
 
-  #loop-range-display {
-    flex: 1; font-family: 'DM Mono', monospace; font-size: 10px;
-    color: rgba(255,255,255,0.35); text-align: right; white-space: nowrap;
-    overflow: hidden; text-overflow: ellipsis;
-  }
+#loop-range-display {
+flex: 1; font-family: ‘DM Mono’, monospace; font-size: 10px;
+color: rgba(255,255,255,0.35); text-align: right; white-space: nowrap;
+overflow: hidden; text-overflow: ellipsis;
+}
 
-  /* Range overlay on thumbnail strip */
-  #loop-range-overlay {
-    position: absolute; top: 0; height: 100%;
-    background: rgba(200,255,71,0.15);
-    border-left: 2px solid var(--accent);
-    border-right: 2px solid var(--accent);
-    pointer-events: none; z-index: 8;
-    display: none;
-  }
-  #loop-range-overlay.show { display: block; }
+/* Range overlay on thumbnail strip */
+#loop-range-overlay {
+position: absolute; top: 0; height: 100%;
+background: rgba(200,255,71,0.15);
+border-left: 2px solid var(–accent);
+border-right: 2px solid var(–accent);
+pointer-events: none; z-index: 8;
+display: none;
+}
+#loop-range-overlay.show { display: block; }
 
-  /* Toast */
-  #toast {
-    position: fixed; bottom: 50px; left: 50%;
-    transform: translateX(-50%) translateY(14px);
-    background: rgba(15,15,22,0.92);
-    backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
-    border: 1px solid rgba(255,255,255,0.1);
-    color: var(--text); padding: 9px 18px;
-    border-radius: 100px; font-size: 13px;
-    font-family: 'DM Mono', monospace;
-    opacity: 0; pointer-events: none;
-    transition: all 0.25s; z-index: 9999; white-space: nowrap;
-  }
-  #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+/* Toast */
+#toast {
+position: fixed; bottom: 50px; left: 50%;
+transform: translateX(-50%) translateY(14px);
+background: rgba(15,15,22,0.92);
+backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+border: 1px solid rgba(255,255,255,0.1);
+color: var(–text); padding: 9px 18px;
+border-radius: 100px; font-size: 13px;
+font-family: ‘DM Mono’, monospace;
+opacity: 0; pointer-events: none;
+transition: all 0.25s; z-index: 9999; white-space: nowrap;
+}
+#toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
 </style>
+
 </head>
 <body>
 
 <!-- Upload -->
+
 <div id="upload-screen">
   <div class="logo">Video Frame Player</div>
   <div class="upload-zone">
@@ -480,6 +483,7 @@
 </div>
 
 <!-- Player -->
+
 <div id="player-screen">
   <div id="video-container">
     <video id="video" playsinline webkit-playsinline></video>
@@ -493,6 +497,7 @@
   </div>
 
   <!-- Mini bar (when panel hidden) -->
+
   <div id="mini-bar">
     <button class="mini-btn" id="mini-back5">
       <svg viewBox="0 0 24 24"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-3.47"/><text x="12" y="14.5" text-anchor="middle" font-size="6" fill="white" stroke="none" font-family="monospace">5</text></svg>
@@ -518,97 +523,101 @@
   </div>
 
   <!-- Floating controls -->
+
   <div id="controls">
     <div id="hide-pill"><button>︾</button></div>
 
-    <div id="speed-row">
-      <div class="speed-label">速度</div>
-      <div class="speed-btns">
-        <button class="speed-btn" data-speed="0.1">× 0.1</button>
-        <button class="speed-btn" data-speed="0.5">× 0.5</button>
-        <button class="speed-btn active" data-speed="1">× 1</button>
-        <button class="speed-btn" data-speed="2">× 2</button>
-        <button class="speed-btn" data-speed="frame">1 Frame/s</button>
-      </div>
-      <button id="change-video-btn" style="
-        flex-shrink:0;margin-left:8px;padding:5px 11px;
-        border-radius:100px;border:1.5px solid rgba(255,255,255,0.2);
-        background:transparent;color:rgba(255,255,255,0.5);
-        font-family:'DM Mono',monospace;font-size:12px;cursor:pointer;white-space:nowrap;
-      ">換片</button>
-    </div>
+```
+<div id="speed-row">
+  <div class="speed-label">速度</div>
+  <div class="speed-btns">
+    <button class="speed-btn" data-speed="0.1">× 0.1</button>
+    <button class="speed-btn" data-speed="0.5">× 0.5</button>
+    <button class="speed-btn active" data-speed="1">× 1</button>
+    <button class="speed-btn" data-speed="2">× 2</button>
+    <button class="speed-btn" data-speed="frame">1 Frame/s</button>
+  </div>
+  <button id="change-video-btn" style="
+    flex-shrink:0;margin-left:8px;padding:5px 11px;
+    border-radius:100px;border:1.5px solid rgba(255,255,255,0.2);
+    background:transparent;color:rgba(255,255,255,0.5);
+    font-family:'DM Mono',monospace;font-size:12px;cursor:pointer;white-space:nowrap;
+  ">換片</button>
+</div>
 
-    <div id="fps-row">
-      <div class="speed-label">FPS</div>
-      <div class="fps-btns">
-        <button class="fps-btn" data-fps="23.976">23.97</button>
-        <button class="fps-btn" data-fps="24">24</button>
-        <button class="fps-btn" data-fps="25">25</button>
-        <button class="fps-btn" data-fps="29.97">29.97</button>
-        <button class="fps-btn active" data-fps="30">30</button>
-        <button class="fps-btn" data-fps="50">50</button>
-        <button class="fps-btn" data-fps="59.94">59.94</button>
-        <button class="fps-btn" data-fps="60">60</button>
-        <button class="fps-btn" data-fps="120">120</button>
-        <button class="fps-btn" data-fps="240">240</button>
-      </div>
-    </div>
+<div id="fps-row">
+  <div class="speed-label">FPS</div>
+  <div class="fps-btns">
+    <button class="fps-btn" data-fps="23.976">23.97</button>
+    <button class="fps-btn" data-fps="24">24</button>
+    <button class="fps-btn" data-fps="25">25</button>
+    <button class="fps-btn" data-fps="29.97">29.97</button>
+    <button class="fps-btn active" data-fps="30">30</button>
+    <button class="fps-btn" data-fps="50">50</button>
+    <button class="fps-btn" data-fps="59.94">59.94</button>
+    <button class="fps-btn" data-fps="60">60</button>
+    <button class="fps-btn" data-fps="120">120</button>
+    <button class="fps-btn" data-fps="240">240</button>
+  </div>
+</div>
 
-    <div id="playback-row">
-      <button class="ctrl-btn" id="back5-btn">
-        <svg viewBox="0 0 24 24"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-3.47"/><text x="12" y="14.5" text-anchor="middle" font-size="6" fill="white" stroke="none" font-family="monospace">5</text></svg>
-        <span>-5s</span>
-      </button>
-      <button class="ctrl-btn" id="prev-frame-btn">
-        <svg viewBox="0 0 24 24"><polygon points="11 19 2 12 11 5 11 19"/><line x1="22" y1="19" x2="22" y2="5"/></svg>
-        <span>上格</span>
-      </button>
-      <button class="ctrl-btn" id="play-btn">
-        <svg id="play-icon" viewBox="0 0 24 24"><polygon fill="#0a0a0c" stroke="#0a0a0c" points="5 3 19 12 5 21 5 3"/></svg>
-        <span id="play-label">播放</span>
-      </button>
-      <button class="ctrl-btn" id="next-frame-btn">
-        <svg viewBox="0 0 24 24"><polygon points="13 19 22 12 13 5 13 19"/><line x1="2" y1="19" x2="2" y2="5"/></svg>
-        <span>下格</span>
-      </button>
-      <button class="ctrl-btn" id="fwd5-btn">
-        <svg viewBox="0 0 24 24"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-.49-3.47"/><text x="12" y="14.5" text-anchor="middle" font-size="6" fill="white" stroke="none" font-family="monospace">5</text></svg>
-        <span>+5s</span>
-      </button>
-      <button class="ctrl-btn save-btn" id="save-btn">
-        <svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="12" cy="13" r="3"/><rect x="8" y="3" width="8" height="4" rx="1"/></svg>
-        <span>截圖</span>
-      </button>
-    </div>
+<div id="playback-row">
+  <button class="ctrl-btn" id="back5-btn">
+    <svg viewBox="0 0 24 24"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-3.47"/><text x="12" y="14.5" text-anchor="middle" font-size="6" fill="white" stroke="none" font-family="monospace">5</text></svg>
+    <span>-5s</span>
+  </button>
+  <button class="ctrl-btn" id="prev-frame-btn">
+    <svg viewBox="0 0 24 24"><polygon points="11 19 2 12 11 5 11 19"/><line x1="22" y1="19" x2="22" y2="5"/></svg>
+    <span>上格</span>
+  </button>
+  <button class="ctrl-btn" id="play-btn">
+    <svg id="play-icon" viewBox="0 0 24 24"><polygon fill="#0a0a0c" stroke="#0a0a0c" points="5 3 19 12 5 21 5 3"/></svg>
+    <span id="play-label">播放</span>
+  </button>
+  <button class="ctrl-btn" id="next-frame-btn">
+    <svg viewBox="0 0 24 24"><polygon points="13 19 22 12 13 5 13 19"/><line x1="2" y1="19" x2="2" y2="5"/></svg>
+    <span>下格</span>
+  </button>
+  <button class="ctrl-btn" id="fwd5-btn">
+    <svg viewBox="0 0 24 24"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-.49-3.47"/><text x="12" y="14.5" text-anchor="middle" font-size="6" fill="white" stroke="none" font-family="monospace">5</text></svg>
+    <span>+5s</span>
+  </button>
+  <button class="ctrl-btn save-btn" id="save-btn">
+    <svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="12" cy="13" r="3"/><rect x="8" y="3" width="8" height="4" rx="1"/></svg>
+    <span>截圖</span>
+  </button>
+</div>
 
-    <div id="timeline-section">
-      <div class="timeline-label">
-        <span>時間軸</span>
-        <span id="total-time-label">—</span>
-      </div>
-      <div id="progress-bar-wrap"><div id="progress-fill"></div></div>
-      <div id="thumbnail-strip">
-        <div id="thumb-canvas-strip"></div>
-        <div id="loop-range-overlay"></div>
-        <div id="timeline-indicator"></div>
-      </div>
-      <div id="thumb-status" class="thumb-loading">生成縮圖中…</div>
-    </div>
+<div id="timeline-section">
+  <div class="timeline-label">
+    <span>時間軸</span>
+    <span id="total-time-label">—</span>
+  </div>
+  <div id="progress-bar-wrap"><div id="progress-fill"></div></div>
+  <div id="thumbnail-strip">
+    <div id="thumb-canvas-strip"></div>
+    <div id="loop-range-overlay"></div>
+    <div id="timeline-indicator"></div>
+  </div>
+  <div id="thumb-status" class="thumb-loading">生成縮圖中…</div>
+</div>
 
-    <div id="loop-row">
-      <button id="loop-set-in">IN</button>
-      <button id="loop-set-out">OUT</button>
-      <button id="loop-clear">✕</button>
-      <button id="loop-toggle">⟲ 循環</button>
-      <select id="export-format">
-        <option value="original">原格式</option>
-        <option value="mp4">MP4</option>
-        <option value="mov">MOV</option>
-      </select>
-      <button id="loop-export">✂ 剪輯</button>
-      <button id="loop-convert">⇄ 轉檔</button>
-      <div id="loop-range-display">—</div>
-    </div>
+<div id="loop-row">
+  <button id="loop-set-in">IN</button>
+  <button id="loop-set-out">OUT</button>
+  <button id="loop-clear">✕</button>
+  <button id="loop-toggle">⟲ 循環</button>
+  <select id="export-format">
+    <option value="original">原格式</option>
+    <option value="mp4">MP4</option>
+    <option value="mov">MOV</option>
+  </select>
+  <button id="loop-export">✂ 剪輯</button>
+  <button id="loop-convert">⇄ 轉檔</button>
+  <div id="loop-range-display">—</div>
+</div>
+```
+
   </div>
 </div>
 
@@ -1129,163 +1138,121 @@ function readFileSlice(file, start, end) {
 
 // ── Byte-range extraction: only read the bytes needed for the clip ──
 async function extractClipBlob(file, clipIn, clipOut) {
-  const HEAD = Math.min(8 * 1024 * 1024, file.size);
+  const SCAN = Math.min(8 * 1024 * 1024, file.size);
 
   // 1. Find ftyp + moov
-  let ftypBytes = null, moovBytes = null;
-
-  function scanBuf(buf) {
-    const v = new DataView(buf);
+  let ftypBytes = null, moovBytes = null, moovFileOffset = 0;
+  const headBuf = await readFileSlice(file, 0, SCAN);
+  {
+    const v = new DataView(headBuf);
     let off = 0;
-    while (off + 8 <= buf.byteLength) {
-      const sz = readU32(v, off);
-      const nm = read4cc(v, off + 4);
+    while (off + 8 <= headBuf.byteLength) {
+      const sz = readU32(v, off), nm = read4cc(v, off + 4);
       if (sz < 8) break;
-      if (nm === 'ftyp') ftypBytes = buf.slice(off, off + sz);
-      if (nm === 'moov') { moovBytes = buf.slice(off, Math.min(off + sz, buf.byteLength)); return; }
+      if (nm === 'ftyp') ftypBytes = headBuf.slice(off, off + sz);
+      if (nm === 'moov') {
+        moovFileOffset = off;
+        moovBytes = headBuf.slice(off, Math.min(off + sz, headBuf.byteLength));
+        break;
+      }
       off += sz;
     }
   }
-
-  const headBuf = await readFileSlice(file, 0, HEAD);
-  scanBuf(headBuf);
-
-  if (!moovBytes && file.size > HEAD) {
-    const tailBuf = await readFileSlice(file, file.size - HEAD, file.size);
-    const tv = new DataView(tailBuf);
-    for (let i = 4; i + 8 <= tailBuf.byteLength; i++) {
+  if (!moovBytes && file.size > SCAN) {
+    const tail = await readFileSlice(file, file.size - SCAN, file.size);
+    const tv = new DataView(tail);
+    for (let i = 4; i + 8 <= tail.byteLength; i++) {
       if (read4cc(tv, i) === 'moov') {
         const sz = readU32(tv, i - 4);
-        moovBytes = tailBuf.slice(i - 4, Math.min(i - 4 + sz, tailBuf.byteLength));
+        moovFileOffset = file.size - SCAN + (i - 4);
+        moovBytes = tail.slice(i - 4, Math.min(i - 4 + sz, tail.byteLength));
         break;
       }
     }
   }
   if (!moovBytes) throw new Error('找不到 moov');
 
-  // 2. Parse video track tables
-  const track = parseVideoTrackFull(moovBytes);
-  if (!track?.stco?.length) throw new Error('找不到視訊軌');
-  const { timescale, stts, stsc, stco, stsz, fixedSampleSize } = track;
+  // 2. Parse video track
+  const vt = parseVideoTrackFull(moovBytes);
+  if (!vt || !vt.stco.length) throw new Error('找不到視訊軌');
+  const { timescale, stts, stsc, stco, stsz, fixedSampleSize } = vt;
+  const totalChunks = stco.length;
 
-  // 3. Parse movie timescale from mvhd
-  const mvhdTimescale = parseMvhdTimescale(moovBytes);
-
-  // 4. Helpers
-  function samplesInChunk(ci) {
+  // 3. samplesPerChunk helper
+  function samplesPerChunk(ci) {
     let r = 1;
-    for (let i = stsc.length - 1; i >= 0; i--) {
+    for (let i = stsc.length - 1; i >= 0; i--)
       if (ci >= stsc[i].firstChunk - 1) { r = stsc[i].samplesPerChunk; break; }
-    }
     return r;
   }
 
-  const totalChunks = stco.length;
-  const chunkSampleStart = [];
-  let cum = 0;
-  for (let c = 0; c < totalChunks; c++) { chunkSampleStart.push(cum); cum += samplesInChunk(c); }
-  const totalSamples = cum;
+  // 4. chunk start sample table
+  const chunkSS = new Array(totalChunks);
+  { let s = 0; for (let c = 0; c < totalChunks; c++) { chunkSS[c] = s; s += samplesPerChunk(c); } }
+  const totalSamples = chunkSS[totalChunks - 1] + samplesPerChunk(totalChunks - 1);
 
-  function timeToSampleIdx(sec) {
+  // 5. time → sample
+  function timeToSample(sec) {
     const target = Math.round(sec * timescale);
-    let sample = 0, t = 0;
+    let s = 0, t = 0;
     for (const e of stts) {
-      if (!e.delta) { sample += e.count; continue; }
+      if (!e.delta) { s += e.count; continue; }
       const end = t + e.count * e.delta;
-      if (end > target) return sample + Math.max(0, Math.floor((target - t) / e.delta));
-      t = end; sample += e.count;
+      if (end > target) return s + Math.floor((target - t) / e.delta);
+      t = end; s += e.count;
     }
-    return totalSamples;
+    return Math.min(s, totalSamples);
   }
 
-  const startSample = timeToSampleIdx(clipIn);
-  const endSample   = Math.min(totalSamples, timeToSampleIdx(clipOut));
-  const clipSampleCount = endSample - startSample;
-
-  function sampleToChunk(si) {
-    for (let c = 0; c < totalChunks - 1; c++) {
-      if (chunkSampleStart[c + 1] > si) return c;
-    }
-    return totalChunks - 1;
+  function sampleSize(si) {
+    if (fixedSampleSize > 0) return fixedSampleSize;
+    return si < stsz.length ? stsz[si] : 0;
   }
 
-  const startChunk = sampleToChunk(startSample);
-  const endChunk   = sampleToChunk(Math.max(startSample, endSample - 1));
-  const clipChunkCount = endChunk - startChunk + 1;
+  // 6. Find chunk range for clip
+  const startSample = timeToSample(clipIn);
+  const endSample   = Math.min(totalSamples, timeToSample(clipOut));
 
-  // 5. Byte range for clip chunks
+  let startChunk = 0;
+  for (let c = 0; c < totalChunks - 1; c++) {
+    if (chunkSS[c + 1] > startSample) break;
+    startChunk = c + 1;
+  }
+  startChunk = Math.min(startChunk, totalChunks - 1);
+
+  let endChunk = startChunk;
+  for (let c = startChunk; c < totalChunks; c++) {
+    endChunk = c;
+    if (chunkSS[c] + samplesPerChunk(c) >= endSample) break;
+  }
+
+  // 7. Byte range
   const startByte = stco[startChunk];
   let endByte;
   if (endChunk + 1 < totalChunks) {
     endByte = stco[endChunk + 1];
   } else {
     endByte = stco[endChunk];
-    const n = samplesInChunk(endChunk);
-    if (fixedSampleSize > 0) {
-      endByte += fixedSampleSize * n;
-    } else {
-      for (let i = 0; i < n; i++) endByte += stsz[chunkSampleStart[endChunk] + i] || 0;
-    }
+    const n = samplesPerChunk(endChunk);
+    for (let i = 0; i < n; i++) endByte += sampleSize(chunkSS[endChunk] + i);
   }
   endByte = Math.min(endByte, file.size);
 
   const mdatPayload = await readFileSlice(file, startByte, endByte);
 
-  // 6. Build trimmed tables
-  // stts: only samples in [startSample, endSample)
-  const clipStts = [];
-  { let si = 0;
-    for (const e of stts) {
-      const eEnd = si + e.count;
-      const a = Math.max(si, startSample), b = Math.min(eEnd, endSample);
-      if (b > a) clipStts.push({ count: b - a, delta: e.delta });
-      si = eEnd; if (si >= endSample) break;
-    }
-  }
+  // 8. Patch stco in moov copy
+  const patchedMoov = patchStco(moovBytes, startByte,
+    (ftypBytes ? ftypBytes.byteLength : 0) + moovBytes.byteLength + 8);
 
-  // stsc: relative to startChunk (1-indexed)
-  const clipStsc = [];
-  for (let c = startChunk; c <= endChunk; c++) {
-    const n = samplesInChunk(c);
-    if (!clipStsc.length || clipStsc[clipStsc.length - 1].samplesPerChunk !== n)
-      clipStsc.push({ firstChunk: c - startChunk + 1, samplesPerChunk: n });
-  }
-
-  // stsz
-  const clipStsz = fixedSampleSize > 0 ? [] :
-    Array.from({ length: clipSampleCount }, (_, i) => stsz[startSample + i] || 0);
-
-  // 7. Estimate moov size (placeholder stco to get exact byte count)
-  const placeholderStco = new Array(clipChunkCount).fill(0);
-  const moovEstimate = rebuildMoov(moovBytes,
-    clipStts, clipStsc, placeholderStco, clipStsz,
-    fixedSampleSize, clipSampleCount, clipIn, clipOut, timescale, mvhdTimescale);
-
-  // 8. Real stco with correct offsets
-  const ftypSize  = ftypBytes ? ftypBytes.byteLength : 0;
-  const moovSize  = moovEstimate.byteLength;
-  const mdatStart = ftypSize + moovSize + 8; // +8 for mdat header
-
-  const clipStco = [];
-  for (let c = startChunk; c <= endChunk; c++) {
-    clipStco.push(mdatStart + (stco[c] - startByte));
-  }
-
-  // 9. Final moov
-  const newMoov = rebuildMoov(moovBytes,
-    clipStts, clipStsc, clipStco, clipStsz,
-    fixedSampleSize, clipSampleCount, clipIn, clipOut, timescale, mvhdTimescale);
-
-  // 10. mdat header
+  // 9. mdat header
   const mdatHdr = new ArrayBuffer(8);
   const mdv = new DataView(mdatHdr);
   mdv.setUint32(0, mdatPayload.byteLength + 8, false);
-  mdv.setUint8(4, 0x6D); mdv.setUint8(5, 0x64);
-  mdv.setUint8(6, 0x61); mdv.setUint8(7, 0x74);
+  mdv.setUint8(4, 0x6D); mdv.setUint8(5, 0x64); mdv.setUint8(6, 0x61); mdv.setUint8(7, 0x74);
 
   const parts = [];
   if (ftypBytes) parts.push(ftypBytes);
-  parts.push(newMoov);
+  parts.push(patchedMoov);
   parts.push(mdatHdr);
   parts.push(mdatPayload);
 
@@ -1293,220 +1260,33 @@ async function extractClipBlob(file, clipIn, clipOut) {
   return new Blob(parts, { type: mime });
 }
 
-function parseMvhdTimescale(moovBytes) {
-  const v = new DataView(moovBytes);
-  let off = 8;
-  while (off + 8 <= moovBytes.byteLength) {
-    const sz = readU32(v, off);
-    const nm = read4cc(v, off + 4);
-    if (sz < 8) break;
-    if (nm === 'mvhd') {
-      const ver = v.getUint8(off + 8);
-      return ver === 1
-        ? readU32(v, off + 8 + 4 + 8 + 8)   // v1: ver(1)+flags(3)+ctime(8)+mtime(8)+ts
-        : readU32(v, off + 8 + 4 + 4 + 4);   // v0: ver(1)+flags(3)+ctime(4)+mtime(4)+ts
-    }
-    off += sz;
-  }
-  return 1000;
-}
-
-function parseVideoTrackFull(moovBytes) {
-  const view = new DataView(moovBytes);
-  let off = 8;
-  while (off + 8 <= moovBytes.byteLength) {
-    const sz = readU32(view, off);
-    const nm = read4cc(view, off + 4);
-    if (sz < 8) break;
-    if (nm === 'trak') {
-      const t = parseTrakFull(view, off + 8, Math.min(off + sz, moovBytes.byteLength));
-      if (t?.isVideo) return t;
-    }
-    off += sz;
-  }
-  return null;
-}
-
-function parseTrakFull(view, start, end) {
-  let timescale = null, isVideo = false;
-  let stts = [], stsc = [], stco = [], stsz = [], fixedSampleSize = 0;
+// Simple stco patcher: adjust offsets from originalStart → newMdatStart
+function patchStco(moovBuf, originalStart, newMdatStart) {
+  const buf = moovBuf.slice(0);
+  const v = new DataView(buf);
+  const delta = newMdatStart - originalStart;
 
   function walk(s, e) {
     let off = s;
     while (off + 8 <= e) {
-      const sz = readU32(view, off);
-      const nm = read4cc(view, off + 4);
+      const sz = readU32(v, off), nm = read4cc(v, off + 4);
       if (sz < 8) break;
-      const cs = off + 8, ce = Math.min(off + sz, e);
-      if (['mdia','minf','stbl'].includes(nm)) { walk(cs, ce); }
-      else if (nm === 'mdhd') { timescale = parseMdhd(view, cs, ce); }
-      else if (nm === 'hdlr') { if (parseHdlr(view, cs, ce)) isVideo = true; }
-      else if (nm === 'stts') {
-        const cnt = readU32(view, cs + 4);
-        for (let i = 0; i < cnt; i++) {
-          const b = cs + 8 + i * 8;
-          if (b + 7 >= ce) break;
-          stts.push({ count: readU32(view, b), delta: readU32(view, b + 4) });
-        }
-      }
-      else if (nm === 'stsc') {
-        const cnt = readU32(view, cs + 4);
-        for (let i = 0; i < cnt; i++) {
-          const b = cs + 8 + i * 12;
-          if (b + 11 >= ce) break;
-          stsc.push({ firstChunk: readU32(view, b), samplesPerChunk: readU32(view, b + 4) });
-        }
-      }
+      const ce = Math.min(off + sz, e);
+      if (['trak','mdia','minf','stbl'].includes(nm)) { walk(off + 8, ce); }
       else if (nm === 'stco') {
-        const cnt = readU32(view, cs + 4);
+        const cnt = readU32(v, off + 12);
         for (let i = 0; i < cnt; i++) {
-          const b = cs + 8 + i * 4;
-          if (b + 3 >= ce) break;
-          stco.push(readU32(view, b));
-        }
-      }
-      else if (nm === 'co64') {
-        const cnt = readU32(view, cs + 4);
-        for (let i = 0; i < cnt; i++) {
-          const b = cs + 8 + i * 8;
-          if (b + 7 >= ce) break;
-          stco.push(readU32(view, b) * 0x100000000 + readU32(view, b + 4));
-        }
-      }
-      else if (nm === 'stsz') {
-        fixedSampleSize = readU32(view, cs + 4);
-        if (!fixedSampleSize) {
-          const cnt = readU32(view, cs + 8);
-          for (let i = 0; i < cnt; i++) {
-            const b = cs + 12 + i * 4;
-            if (b + 3 >= ce) break;
-            stsz.push(readU32(view, b));
-          }
+          const p = off + 16 + i * 4;
+          if (p + 4 > buf.byteLength) break;
+          v.setUint32(p, readU32(v, p) + delta, false);
         }
       }
       off += sz;
     }
   }
-  walk(start, end);
-  if (!isVideo || !timescale || !stco.length) return null;
-  return { timescale, stts, stsc, stco, stsz, fixedSampleSize, isVideo };
+  walk(8, buf.byteLength);
+  return buf;
 }
-
-function rebuildMoov(moovBytes, clipStts, clipStsc, clipStco, clipStsz,
-                     fixedSampleSize, clipSampleCount, clipIn, clipOut,
-                     mediaTsScale, mvhdTsScale) {
-  const clipDurMedia = Math.round((clipOut - clipIn) * mediaTsScale);
-  const clipDurMovie = Math.round((clipOut - clipIn) * mvhdTsScale);
-
-  function concat(...bufs) {
-    const total = bufs.reduce((a, b) => a + b.byteLength, 0);
-    const out = new Uint8Array(total);
-    let pos = 0;
-    for (const b of bufs) { out.set(new Uint8Array(b), pos); pos += b.byteLength; }
-    return out.buffer;
-  }
-
-  function makeBox(name, ...payloads) {
-    const payload = concat(...payloads);
-    const hdr = new ArrayBuffer(8);
-    const hv = new DataView(hdr);
-    hv.setUint32(0, 8 + payload.byteLength, false);
-    for (let i = 0; i < 4; i++) hv.setUint8(4 + i, name.charCodeAt(i));
-    return concat(hdr, payload);
-  }
-
-  function u32buf(n) {
-    const b = new ArrayBuffer(4);
-    new DataView(b).setUint32(0, n, false);
-    return b;
-  }
-  const vflags = new ArrayBuffer(4); // version=0, flags=0
-
-  function buildStts() {
-    const entries = new ArrayBuffer(clipStts.length * 8);
-    const v = new DataView(entries);
-    clipStts.forEach((e, i) => { v.setUint32(i*8, e.count, false); v.setUint32(i*8+4, e.delta, false); });
-    return makeBox('stts', vflags, u32buf(clipStts.length), entries);
-  }
-
-  function buildStsc() {
-    const entries = new ArrayBuffer(clipStsc.length * 12);
-    const v = new DataView(entries);
-    clipStsc.forEach((e, i) => {
-      v.setUint32(i*12, e.firstChunk, false);
-      v.setUint32(i*12+4, e.samplesPerChunk, false);
-      v.setUint32(i*12+8, 1, false);
-    });
-    return makeBox('stsc', vflags, u32buf(clipStsc.length), entries);
-  }
-
-  function buildStco() {
-    const entries = new ArrayBuffer(clipStco.length * 4);
-    const v = new DataView(entries);
-    clipStco.forEach((o, i) => v.setUint32(i*4, o, false));
-    return makeBox('stco', vflags, u32buf(clipStco.length), entries);
-  }
-
-  function buildStsz() {
-    if (fixedSampleSize > 0)
-      return makeBox('stsz', vflags, u32buf(fixedSampleSize), u32buf(clipSampleCount));
-    const entries = new ArrayBuffer(clipStsz.length * 4);
-    const v = new DataView(entries);
-    clipStsz.forEach((s, i) => v.setUint32(i*4, s, false));
-    return makeBox('stsz', vflags, u32buf(0), u32buf(clipStsz.length), entries);
-  }
-
-  function walkRebuild(buf, s, e) {
-    const v = new DataView(buf);
-    const parts = [];
-    let off = s;
-    while (off + 8 <= e) {
-      const sz = readU32(v, off);
-      const nm = read4cc(v, off + 4);
-      if (sz < 8) break;
-      const cs = off + 8, ce = Math.min(off + sz, e);
-
-      if (['moov','trak','mdia','minf','stbl'].includes(nm)) {
-        parts.push(makeBox(nm, walkRebuild(buf, cs, ce)));
-      } else if (nm === 'stts') {
-        parts.push(buildStts());
-      } else if (nm === 'stsc') {
-        parts.push(buildStsc());
-      } else if (nm === 'stco' || nm === 'co64') {
-        parts.push(buildStco());
-      } else if (nm === 'stsz') {
-        parts.push(buildStsz());
-      } else if (nm === 'mdhd') {
-        const orig = buf.slice(cs, ce);
-        const ov = new DataView(orig);
-        if (ov.getUint8(0) === 1) ov.setUint32(20, clipDurMedia, false);
-        else                       ov.setUint32(16, clipDurMedia, false);
-        parts.push(makeBox('mdhd', orig));
-      } else if (nm === 'mvhd') {
-        const orig = buf.slice(cs, ce);
-        const ov = new DataView(orig);
-        if (ov.getUint8(0) === 1) ov.setUint32(28, clipDurMovie, false);
-        else                       ov.setUint32(16, clipDurMovie, false);
-        parts.push(makeBox('mvhd', orig));
-      } else if (nm === 'tkhd') {
-        const orig = buf.slice(cs, ce);
-        const ov = new DataView(orig);
-        if (ov.getUint8(0) === 1) ov.setUint32(28, clipDurMovie, false);
-        else                       ov.setUint32(20, clipDurMovie, false);
-        parts.push(makeBox('tkhd', orig));
-      } else if (nm === 'elst' || nm === 'edts') {
-        // skip - avoids playback offset issues
-      } else {
-        parts.push(buf.slice(off, ce));
-      }
-      off += sz;
-    }
-    return concat(...parts);
-  }
-
-  return walkRebuild(moovBytes, 0, moovBytes.byteLength);
-}
-
 
 function seekExact(t) {
   return new Promise(resolve => {
@@ -1857,39 +1637,92 @@ document.getElementById('loop-export').addEventListener('click', async e => {
   exportCancelled = false;
   exportOverlay.classList.add('show');
   exportStatus.textContent = '分析影片結構…';
-  exportProgressF.style.width = '10%';
+  exportProgressF.style.width = '5%';
 
   try {
-    const formatSel = document.getElementById('export-format').value;
+    const { createFFmpeg, fetchFile } = FFmpeg;
     const srcExt = (currentFile.name.split('.').pop() || 'mp4').toLowerCase();
+    const formatSel = document.getElementById('export-format').value;
     const outExt = formatSel === 'original' ? srcExt : formatSel;
-    const ss = loopIn.toFixed(3);
+    const ss  = loopIn.toFixed(3);
+    const dur = (loopOut - loopIn).toFixed(3);
+    const to  = loopOut.toFixed(3);
     const base = currentFile.name.replace(/\.[^.]+$/, '') || 'clip';
 
-    if (outExt !== srcExt) {
-      // Format conversion: still needs FFmpeg, warn user
-      exportOverlay.classList.remove('show');
-      showToast('格式轉換請使用下方 ⇄ 轉檔');
-      clearPendingClip();
-      return;
+    // Step 1: Extract only the clip bytes (large file → small blob)
+    let inputBlob;
+    try {
+      exportStatus.textContent = '提取片段位元組…';
+      inputBlob = await extractClipBlob(currentFile, loopIn, loopOut);
+      exportStatus.textContent = `片段 ${(inputBlob.size/1024/1024).toFixed(0)}MB，載入 FFmpeg…`;
+    } catch(e) {
+      // Fallback to full file if extraction fails
+      inputBlob = currentFile;
+      exportStatus.textContent = `使用完整檔案，載入 FFmpeg…`;
     }
-
-    exportProgressF.style.width = '30%';
-    exportStatus.textContent = '提取片段…';
-
-    const blob = await extractClipBlob(currentFile, loopIn, loopOut);
+    exportProgressF.style.width = '20%';
 
     if (exportCancelled) { exportOverlay.classList.remove('show'); return; }
 
-    exportProgressF.style.width = '95%';
-    exportStatus.textContent = `輸出 ${(blob.size/1024/1024).toFixed(0)}MB…`;
+    // Step 2: FFmpeg trims the small blob correctly
+    if (!ffmpegInstance) {
+      ffmpegInstance = createFFmpeg({
+        log: false,
+        corePath: window.location.origin + '/ffmpeg/ffmpeg-core.js',
+      });
+    }
+    if (!ffmpegLoaded) {
+      await ffmpegInstance.load();
+      ffmpegLoaded = true;
+    }
 
-    const url = URL.createObjectURL(blob);
-    const a   = document.createElement('a');
+    ffmpegInstance.setProgress(({ ratio }) => {
+      if (ratio >= 0) exportProgressF.style.width = Math.min(95, 25 + Math.round(ratio * 70)) + '%';
+    });
+
+    if (exportCancelled) { exportOverlay.classList.remove('show'); return; }
+
+    exportStatus.textContent = '剪輯中…';
+    const inName  = 'input.' + srcExt;
+    const outName = 'clip.' + outExt;
+    ffmpegInstance.FS('writeFile', inName, await fetchFile(inputBlob));
+
+    if (outExt !== srcExt) {
+      // Format conversion: re-encode
+      await ffmpegInstance.run(
+        '-ss', ss, '-i', inName, '-t', dur,
+        '-map', '0:v:0', '-map', '0:a:0?',
+        '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '18',
+        '-c:a', 'aac', '-b:a', '128k',
+        '-movflags', '+faststart', outName
+      );
+    } else {
+      // Same format: keyframe copy
+      await ffmpegInstance.run(
+        '-ss', ss, '-to', to,
+        '-i', inName, '-t', dur,
+        '-map', '0:v:0', '-map', '0:a:0?',
+        '-c', 'copy', outName
+      );
+    }
+
+    if (exportCancelled) { exportOverlay.classList.remove('show'); return; }
+
+    exportProgressF.style.width = '97%';
+    exportStatus.textContent = '輸出中…';
+
+    const mimeType = outExt === 'mov' ? 'video/quicktime' : 'video/mp4';
+    const data = ffmpegInstance.FS('readFile', outName);
+    const blob = new Blob([data.buffer], { type: mimeType });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
     a.href = url;
     a.download = `${base}_clip_${ss.replace('.','_')}.${outExt}`;
     document.body.appendChild(a); a.click(); document.body.removeChild(a);
     setTimeout(() => URL.revokeObjectURL(url), 3000);
+
+    try { ffmpegInstance.FS('unlink', inName); } catch(e2) {}
+    try { ffmpegInstance.FS('unlink', outName); } catch(e2) {}
 
     exportProgressF.style.width = '100%';
     exportStatus.textContent = '完成！';
@@ -2130,5 +1963,6 @@ window.addEventListener('load', () => {
   }
 });
 </script>
+
 </body>
 </html>
