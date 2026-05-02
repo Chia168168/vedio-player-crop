@@ -1385,6 +1385,70 @@ async function extractClipBlob(file, clipIn, clipOut) {
   return new Blob(finalParts,{type:mime});
 }
 
+function parseVideoTrackFull(moovBuf) {
+  const view = new DataView(moovBuf);
+  let off = 8;
+  while (off + 8 <= moovBuf.byteLength) {
+    const sz = readU32(view, off), nm = read4cc(view, off + 4);
+    if (sz < 8) break;
+    if (nm === 'trak') {
+      const t = parseTrakFull(view, off + 8, Math.min(off + sz, moovBuf.byteLength));
+      if (t && t.isVideo) return t;
+    }
+    off += sz;
+  }
+  return null;
+}
+
+function parseTrakFull(view, start, end) {
+  let timescale = null, isVideo = false;
+  let stts = [], stsc = [], stco = [], stsz = [], fixedSampleSize = 0;
+
+  function walk(s, e) {
+    let off = s;
+    while (off + 8 <= e) {
+      const sz = readU32(view, off), nm = read4cc(view, off + 4);
+      if (sz < 8) break;
+      const cs = off + 8, ce = Math.min(off + sz, e);
+      if (['mdia','minf','stbl'].includes(nm)) { walk(cs, ce); }
+      else if (nm === 'mdhd') { timescale = parseMdhd(view, cs, ce); }
+      else if (nm === 'hdlr') { if (parseHdlr(view, cs, ce)) isVideo = true; }
+      else if (nm === 'stts') {
+        const cnt = readU32(view, cs + 4);
+        for (let i = 0; i < cnt && cs + 8 + i*8 + 7 < ce; i++)
+          stts.push({ count: readU32(view, cs+8+i*8), delta: readU32(view, cs+8+i*8+4) });
+      }
+      else if (nm === 'stsc') {
+        const cnt = readU32(view, cs + 4);
+        for (let i = 0; i < cnt && cs + 8 + i*12 + 11 < ce; i++)
+          stsc.push({ firstChunk: readU32(view, cs+8+i*12), samplesPerChunk: readU32(view, cs+8+i*12+4) });
+      }
+      else if (nm === 'stco') {
+        const cnt = readU32(view, cs + 4);
+        for (let i = 0; i < cnt && cs + 8 + i*4 + 3 < ce; i++)
+          stco.push(readU32(view, cs+8+i*4));
+      }
+      else if (nm === 'co64') {
+        const cnt = readU32(view, cs + 4);
+        for (let i = 0; i < cnt && cs + 8 + i*8 + 7 < ce; i++)
+          stco.push(readU32(view, cs+8+i*8) * 0x100000000 + readU32(view, cs+8+i*8+4));
+      }
+      else if (nm === 'stsz') {
+        fixedSampleSize = readU32(view, cs + 4);
+        if (!fixedSampleSize) {
+          const cnt = readU32(view, cs + 8);
+          for (let i = 0; i < cnt && cs + 12 + i*4 + 3 < ce; i++)
+            stsz.push(readU32(view, cs+12+i*4));
+        }
+      }
+      off += sz;
+    }
+  }
+  walk(start, end);
+  if (!isVideo || !timescale) return null;
+  return { timescale, stts, stsc, stco, stsz, fixedSampleSize, isVideo };
+}
+
 function seekExact(t) {
   return new Promise(resolve => {
     const clamped = Math.max(0, Math.min(duration - 0.001, t));
