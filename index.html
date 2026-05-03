@@ -1195,7 +1195,7 @@ async function extractClipBlob(file, clipIn, clipOut) {
   // ── parse video track ──
   const vt = parseVideoTrackFull(moovU8.buffer);
   if (!vt || !vt.stco.length) throw new Error('找不到視訊軌');
-  const { timescale, stts, stsc, stco, stsz, fixedSampleSize } = vt;
+  const { timescale, stts, stsc, stco, stsz, stss, fixedSampleSize } = vt;
   const TC = stco.length;
 
   function spc(ci) {
@@ -1219,18 +1219,13 @@ async function extractClipBlob(file, clipIn, clipOut) {
   }
   function ss(si) { return fixedSampleSize>0 ? fixedSampleSize : (si<stsz.length?stsz[si]:0); }
 
-  // chunk range
-  const s0 = time2s(clipIn), s1 = Math.min(TS, time2s(clipOut));
+  // chunk range (snap to keyframe after origStss is parsed below)
+  const s0raw = time2s(clipIn), s1 = Math.min(TS, time2s(clipOut));
+  let s0 = s0raw; // will be snapped to keyframe below
   let c0=0; for(let c=0;c<TC-1;c++){if(css[c+1]>s0)break; c0=c+1;} c0=Math.min(c0,TC-1);
   let c1=c0; for(let c=c0;c<TC;c++){c1=c; if(css[c]+spc(c)>=s1)break;}
 
-  // byte range
-  const byteStart = stco[c0];
-  let byteEnd = c1+1<TC ? stco[c1+1] : stco[c1]+(()=>{let b=0,n=spc(c1);for(let i=0;i<n;i++)b+=ss(css[c1]+i);return b;})();
-  byteEnd = Math.min(byteEnd, file.size);
-  const mdat = new Uint8Array(await readFileSlice(file, byteStart, byteEnd));
-  const CC = c1-c0+1;
-  const clipS0 = css[c0], clipS1 = Math.min(s1, css[c1]+spc(c1));
+  let clipS0 = css[c0], clipS1 = Math.min(s1, css[c1]+spc(c1));
 
   // ── build trimmed tables ──
   // stts
@@ -1247,7 +1242,6 @@ async function extractClipBlob(file, clipIn, clipOut) {
   // clip duration ticks
   let clipTicks=0; for(const [cnt,dlt] of newStts) clipTicks+=cnt*dlt;
 
-  // ── build stbl boxes ──
   function mkStts() {
     const b = new Uint8Array(8 + newStts.length*8); w32(b,4,newStts.length);
     newStts.forEach(([c,d],i)=>{w32(b,8+i*8,c);w32(b,8+i*8+4,d);}); return box('stts',b);
@@ -1285,15 +1279,101 @@ async function extractClipBlob(file, clipIn, clipOut) {
     return b;
   }
 
+  // Parse stss (keyframe list) and ctts (composition offsets) from original trak
+  let origStss = [], origCtts = [];
+  { const vbuf = moovU8.buffer;
+    const vv = new DataView(vbuf);
+    function findTables(s, e) {
+      let off = s;
+      while (off + 8 <= e) {
+        const sz = readU32(vv, off), nm = read4cc(vv, off + 4);
+        if (sz < 8) break;
+        const cs = off + 8, ce2 = Math.min(off + sz, e);
+        if (['mdia','minf','stbl'].includes(nm)) findTables(cs, ce2);
+        else if (nm === 'stss') {
+          const cnt = readU32(vv, cs + 4);
+          for (let i = 0; i < cnt && cs + 8 + i*4 + 3 < ce2; i++)
+            origStss.push(readU32(vv, cs + 8 + i*4));
+        }
+        else if (nm === 'ctts') {
+          const cnt = readU32(vv, cs + 4);
+          for (let i = 0; i < cnt && cs + 8 + i*8 + 7 < ce2; i++)
+            origCtts.push({ count: readU32(vv, cs + 8 + i*8), offset: readU32(vv, cs + 8 + i*8 + 4) });
+        }
+        off += sz;
+      }
+    }
+    // Find the video trak
+    let toff = 8;
+    while (toff + 8 <= moovU8.length) {
+      const sz = u32(moovU8, toff), nm = cc(moovU8, toff + 4);
+      if (sz < 8) break;
+      if (nm === 'trak' && isVideoTrak(moovU8, toff + 8, Math.min(toff + sz, moovU8.length)))
+        { findTables(toff + 8, Math.min(toff + sz, moovU8.length)); break; }
+      toff += sz;
+    }
+  }
+
+  // Snap s0 to nearest keyframe using origStss
+  if (origStss.length) {
+    const s0rawIdx = s0raw; // 0-based
+    let kf = origStss[0] - 1;
+    for (const n of origStss) { const k = n - 1; if (k <= s0rawIdx) kf = k; else break; }
+    s0 = kf;
+    // Recalculate chunk range with new s0
+    c0 = 0; for (let c = 0; c < TC - 1; c++) { if (css[c+1] > s0) break; c0 = c+1; }
+    c0 = Math.min(c0, TC-1);
+    c1 = c0; for (let c = c0; c < TC; c++) { c1 = c; if (css[c]+spc(c) >= s1) break; }
+    clipS0 = css[c0]; clipS1 = Math.min(s1, css[c1]+spc(c1));
+  }
+
+  // Byte range (after keyframe snap)
+  const byteStart = stco[c0];
+  let byteEnd = c1+1<TC ? stco[c1+1] : stco[c1]+(()=>{let b=0,n=spc(c1);for(let i=0;i<n;i++)b+=ss(css[c1]+i);return b;})();
+  byteEnd = Math.min(byteEnd, file.size);
+  const mdat = new Uint8Array(await readFileSlice(file, byteStart, byteEnd));
+  const CC = c1-c0+1;
+
+  // Trim stss to clip sample range, re-index from 1
+  function mkStss() {
+    const entries = origStss
+      .filter(n => n - 1 >= clipS0 && n - 1 < clipS1)
+      .map(n => n - clipS0); // 1-based sample number within clip
+    if (!entries.length) return null;
+    const b = new Uint8Array(8 + entries.length * 4);
+    w32(b, 4, entries.length);
+    entries.forEach((v, i) => w32(b, 8 + i*4, v));
+    return box('stss', b);
+  }
+
+  // Trim ctts to clip sample range
+  function mkCtts() {
+    if (!origCtts.length) return null;
+    const result = [];
+    let si = 0;
+    for (const e of origCtts) {
+      const a = Math.max(si, clipS0), b2 = Math.min(si + e.count, clipS1);
+      if (b2 > a) result.push({ count: b2 - a, offset: e.offset });
+      si += e.count;
+      if (si >= clipS1) break;
+    }
+    if (!result.length) return null;
+    const b = new Uint8Array(8 + result.length * 8);
+    w32(b, 4, result.length);
+    result.forEach((e, i) => { w32(b, 8 + i*8, e.count); w32(b, 8 + i*8 + 4, e.offset); });
+    return box('ctts', b);
+  }
+
   function walkStbl(b, s, e, stcoOffsets) {
     const parts=[]; let off=s;
     while(off+8<=e){const sz=u32(b,off),nm=cc(b,off+4);if(sz<8)break;
       const ce=Math.min(off+sz,e);
       if(nm==='stts') parts.push(mkStts());
       else if(nm==='stsc') parts.push(mkStsc());
-      else if(nm==='stco'||nm==='co64') parts.push(mkStco(stcoOffsets)); // replace with correct offsets
+      else if(nm==='stco'||nm==='co64') parts.push(mkStco(stcoOffsets));
       else if(nm==='stsz') parts.push(mkStsz());
-      else if(nm==='stss'||nm==='ctts') {} // skip
+      else if(nm==='stss') { const s2=mkStss(); if(s2) parts.push(s2); }
+      else if(nm==='ctts') { const c2=mkCtts(); if(c2) parts.push(c2); }
       else parts.push(b.slice(off,ce));
       off+=sz;}
     return parts;
@@ -1403,7 +1483,7 @@ function parseVideoTrackFull(moovBuf) {
 
 function parseTrakFull(view, start, end) {
   let timescale = null, isVideo = false;
-  let stts = [], stsc = [], stco = [], stsz = [], fixedSampleSize = 0;
+  let stts = [], stsc = [], stco = [], stsz = [], stss = [], fixedSampleSize = 0;
 
   function walk(s, e) {
     let off = s;
@@ -1442,12 +1522,17 @@ function parseTrakFull(view, start, end) {
             stsz.push(readU32(view, cs+12+i*4));
         }
       }
+      else if (nm === 'stss') {
+        const cnt = readU32(view, cs + 4);
+        for (let i = 0; i < cnt && cs + 8 + i*4 + 3 < ce; i++)
+          stss.push(readU32(view, cs+8+i*4) - 1); // convert to 0-based
+      }
       off += sz;
     }
   }
   walk(start, end);
   if (!isVideo || !timescale) return null;
-  return { timescale, stts, stsc, stco, stsz, fixedSampleSize, isVideo };
+  return { timescale, stts, stsc, stco, stsz, stss, fixedSampleSize, isVideo };
 }
 
 function seekExact(t) {
