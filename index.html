@@ -1543,12 +1543,12 @@ function seekExact(t) {
       if (settled) return;
       settled = true;
       video.removeEventListener('seeked', done);
-      resolve();
+      // Force repaint on iOS: draw one frame via rAF
+      requestAnimationFrame(() => resolve());
     };
     video.addEventListener('seeked', done);
     video.currentTime = clamped;
-    // Timeout fallback: iOS sometimes doesn't fire seeked for tiny seeks
-    setTimeout(done, 800);
+    setTimeout(done, 300); // short fallback
   });
 }
 
