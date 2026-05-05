@@ -1534,51 +1534,37 @@ function parseTrakFull(view, start, end) {
   return { timescale, stts, stsc, stco, stsz, stss, ctts, fixedSampleSize, isVideo };
 }
 
-let isSeeking = false; // prevent play/pause interference during seekExact
+let isSeeking = false;
 
 function seekExact(t) {
   return new Promise(resolve => {
     const clamped = Math.max(0, Math.min(duration - 0.001, t));
     let settled = false;
+    isSeeking = true;
 
-    function forceRender(cb) {
-      // iOS: paused video won't repaint without briefly playing
-      isSeeking = true;
-      const p = video.play();
-      if (p && p.then) {
-        p.then(() => {
-          video.pause();
-          isSeeking = false;
-          requestAnimationFrame(cb);
-        }).catch(() => { isSeeking = false; cb(); });
-      } else {
-        video.pause();
-        isSeeking = false;
-        requestAnimationFrame(cb);
-      }
+    function done() {
+      if (settled) return;
+      settled = true;
+      isSeeking = false;
+      video.removeEventListener('seeked', onSeeked);
+      resolve();
     }
 
     function onSeeked() {
       if (settled) return;
-      settled = true;
-      video.removeEventListener('seeked', onSeeked);
-      forceRender(resolve);
-    }
-
-    function fallback() {
-      if (settled) return;
-      settled = true;
-      video.removeEventListener('seeked', onSeeked);
-      resolve(); // don't force render on timeout
+      if (video.requestVideoFrameCallback) {
+        video.requestVideoFrameCallback(() => done());
+      } else {
+        requestAnimationFrame(() => requestAnimationFrame(() => done()));
+      }
     }
 
     if (Math.abs(video.currentTime - clamped) < 0.0001) {
-      forceRender(resolve); return;
+      isSeeking = false; resolve(); return;
     }
-
     video.addEventListener('seeked', onSeeked);
     video.currentTime = clamped;
-    setTimeout(fallback, 500);
+    setTimeout(done, 500);
   });
 }
 
@@ -1601,28 +1587,9 @@ async function generateThumbnails() {
   const tw = Math.round(H * aspect);
   const count = Math.max(6, Math.round(W / tw));
 
-  // iOS Safari: seeked fires before frame is painted.
-  // Use requestVideoFrameCallback if available, else double-rAF delay.
-  function waitForFrame() {
-    return new Promise(resolve => {
-      if (video.requestVideoFrameCallback) {
-        video.requestVideoFrameCallback(resolve);
-      } else {
-        requestAnimationFrame(() => requestAnimationFrame(resolve));
-      }
-    });
-  }
-
-  // Ensure video is paused and at a decodable state
-  const wasPlaying = !video.paused;
-  video.pause();
-
   for (let i = 0; i < count; i++) {
     try {
-      const t = (i / count) * duration;
-      await seekExact(t);
-      await waitForFrame(); // wait for frame to actually paint
-
+      await seekExact((i / count) * duration);
       const c = document.createElement('canvas');
       c.width = tw; c.height = H;
       c.getContext('2d').drawImage(video, 0, 0, tw, H);
@@ -1633,7 +1600,6 @@ async function generateThumbnails() {
 
   thumbStatus.style.display = 'none';
   try { await seekExact(0); } catch(e) {}
-  if (wasPlaying) video.play();
   updateUI();
 }
 
@@ -1722,9 +1688,26 @@ document.getElementById('fwd5-btn').addEventListener('click', e => {
 // ── Prev / Next frame with long-press ──
 function stepFrame(dir) {
   stopFrameMode();
+  // Cancel any pending seekExact
+  isSeeking = false;
   video.pause(); isPlaying = false; setPlayIcon(false);
-  video.currentTime = Math.max(0, Math.min(duration, video.currentTime + dir / fps));
-  updateUI();
+  const next = Math.max(0, Math.min(duration - 0.001, video.currentTime + dir / fps));
+  let settled = false;
+  function done() {
+    if (settled) return; settled = true;
+    video.removeEventListener('seeked', onSeeked);
+    updateUI();
+  }
+  function onSeeked() {
+    if (video.requestVideoFrameCallback) {
+      video.requestVideoFrameCallback(() => done());
+    } else {
+      requestAnimationFrame(() => requestAnimationFrame(() => done()));
+    }
+  }
+  video.addEventListener('seeked', onSeeked);
+  video.currentTime = next;
+  setTimeout(done, 400);
 }
 function setupLongPress(el, dir) {
   let pt = null, rt = null;
