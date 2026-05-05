@@ -1534,21 +1534,51 @@ function parseTrakFull(view, start, end) {
   return { timescale, stts, stsc, stco, stsz, stss, ctts, fixedSampleSize, isVideo };
 }
 
+let isSeeking = false; // prevent play/pause interference during seekExact
+
 function seekExact(t) {
   return new Promise(resolve => {
     const clamped = Math.max(0, Math.min(duration - 0.001, t));
-    if (Math.abs(video.currentTime - clamped) < 0.0001) { resolve(); return; }
     let settled = false;
-    const done = () => {
+
+    function forceRender(cb) {
+      // iOS: paused video won't repaint without briefly playing
+      isSeeking = true;
+      const p = video.play();
+      if (p && p.then) {
+        p.then(() => {
+          video.pause();
+          isSeeking = false;
+          requestAnimationFrame(cb);
+        }).catch(() => { isSeeking = false; cb(); });
+      } else {
+        video.pause();
+        isSeeking = false;
+        requestAnimationFrame(cb);
+      }
+    }
+
+    function onSeeked() {
       if (settled) return;
       settled = true;
-      video.removeEventListener('seeked', done);
-      // Force repaint on iOS: draw one frame via rAF
-      requestAnimationFrame(() => resolve());
-    };
-    video.addEventListener('seeked', done);
+      video.removeEventListener('seeked', onSeeked);
+      forceRender(resolve);
+    }
+
+    function fallback() {
+      if (settled) return;
+      settled = true;
+      video.removeEventListener('seeked', onSeeked);
+      resolve(); // don't force render on timeout
+    }
+
+    if (Math.abs(video.currentTime - clamped) < 0.0001) {
+      forceRender(resolve); return;
+    }
+
+    video.addEventListener('seeked', onSeeked);
     video.currentTime = clamped;
-    setTimeout(done, 300); // short fallback
+    setTimeout(fallback, 500);
   });
 }
 
@@ -1622,6 +1652,7 @@ function setPlayIcon(on) {
 playBtn.addEventListener('click', e => { e.stopPropagation(); togglePlay(); });
 
 function togglePlay() {
+  if (isSeeking) return; // don't interfere with seekExact's play/pause trick
   if (frameMode) { toggleFrameMode(); hidePanel(); return; }
   if (currentSpeed === 'frame') { toggleFrameMode(); hidePanel(); return; }
   if (video.paused) {
