@@ -431,7 +431,7 @@
 
   #loop-range-display {
     flex: 1; font-family: 'DM Mono', monospace; font-size: 10px;
-    color: rgba(255,255,255,0.35); text-align: right; white-space: nowrap;
+    color: rgba(255,255,255,0.35); text-align: left; white-space: nowrap;
     overflow: hidden; text-overflow: ellipsis;
   }
 
@@ -599,15 +599,14 @@
       <button id="loop-set-in">IN</button>
       <button id="loop-set-out">OUT</button>
       <button id="loop-clear">✕</button>
-      <button id="loop-toggle">⟲ 循環</button>
+      <button id="loop-toggle">⟲</button>
       <select id="export-format">
         <option value="original">原格式</option>
         <option value="mp4">MP4</option>
         <option value="mov">MOV</option>
       </select>
-      <button id="loop-export">✂</button>
-      <button id="loop-convert">⇄</button>
-      <div id="loop-range-display">—</div>
+      <button id="loop-export">剪輯</button>
+      <button id="loop-convert">轉換</button>
     </div>
   </div>
 </div>
