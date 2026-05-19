@@ -1727,7 +1727,8 @@ async function trimMp4(file, startSec, endSec, onProgress) {
       mdatChunks.push(d); mdatOffset+=track.sizes[i];
     }
   }
-  const mdatPayload=concatU8(...mdatChunks);
+  const mdatParts=mdatChunks;
+  const mdatPayloadSize=mdatChunks.reduce((s,a)=>s+a.byteLength,0);
 
   /* ── grab ftyp ── */
   const ftypRaw=await readSlice(0,Math.min(512,fileSize));
@@ -1946,9 +1947,9 @@ async function trimMp4(file, startSec, endSec, onProgress) {
   /* ── final output: ftyp + moov + mdat ── */
   onProgress(0.93,'組合輸出…');
   const mh=new Uint8Array(8);
-  wu32(mh,0,8+mdatPayload.byteLength);
+  wu32(mh,0,8+mdatPayloadSize);
   'mdat'.split('').forEach((c,i)=>mh[4+i]=c.charCodeAt(0));
-  return concatU8(ftypBox,newMoovBox,mh,mdatPayload);
+  return new Blob([ftypBox,newMoovBox,mh,...mdatParts], { type: 'video/mp4' });
 }
 
 /* ═══════════════════════════════════════════════
@@ -2014,7 +2015,7 @@ document.getElementById('loop-export').addEventListener('click', async e => {
 
       exportProgressF.style.width = '98%';
       exportStatus.textContent = '下載中…';
-      const blob = new Blob([outBuf], { type: ext === 'mov' ? 'video/quicktime' : 'video/mp4' });
+      const blob = outBuf instanceof Blob ? outBuf : new Blob([outBuf], { type: ext === 'mov' ? 'video/quicktime' : 'video/mp4' });
       const url  = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url; a.download = `${base}_clip_${ss.replace('.','_')}.${ext}`;
