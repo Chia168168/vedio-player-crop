@@ -1469,13 +1469,35 @@ async function trimMp4(file, startSec, endSec, onProgress) {
   const fileSize = file.size;
 
   /* ── helpers ── */
-  function readSlice(s, e) {
-    return new Promise((res, rej) => {
-      const r = new FileReader();
-      r.onload = ev => res(ev.target.result);
-      r.onerror = rej;
-      r.readAsArrayBuffer(file.slice(s, e));
-    });
+  /* readSlice: split into ≤128 MB chunks to avoid iOS FileReader size limit */
+  const FR_CHUNK = 128 * 1024 * 1024;
+  async function readSlice(s, e) {
+    const size = e - s;
+    if (size <= 0) return new ArrayBuffer(0);
+    if (size <= FR_CHUNK) {
+      return new Promise((res, rej) => {
+        const r = new FileReader();
+        r.onload = ev => res(ev.target.result);
+        r.onerror = ev => rej(new Error('FileReader error @ ' + s + '-' + e));
+        r.readAsArrayBuffer(file.slice(s, e));
+      });
+    }
+    // large slice: read in FR_CHUNK pieces and concat
+    const parts = [];
+    for (let pos = s; pos < e; pos += FR_CHUNK) {
+      if (exportCancelled) throw new Error('cancelled');
+      const part = await new Promise((res, rej) => {
+        const r = new FileReader();
+        r.onload = ev => res(ev.target.result);
+        r.onerror = ev => rej(new Error('FileReader error @ ' + pos));
+        r.readAsArrayBuffer(file.slice(pos, Math.min(pos + FR_CHUNK, e)));
+      });
+      parts.push(new Uint8Array(part));
+    }
+    const total = parts.reduce((s, a) => s + a.byteLength, 0);
+    const out = new Uint8Array(total); let off = 0;
+    for (const p of parts) { out.set(p, off); off += p.byteLength; }
+    return out.buffer;
   }
   function ru32(v, o) { return v.getUint32(o, false); }
   function ri32(v, o) { return v.getInt32(o, false); }
