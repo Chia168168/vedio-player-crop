@@ -2013,86 +2013,80 @@ document.getElementById('loop-export').addEventListener('click', async e => {
   const mimeType = ext === 'mov' ? 'video/quicktime' : 'video/mp4';
   const filename = `${base}_clip_${ss.replace('.','_')}.${ext}`;
 
-  /* ── streaming write helper ──
-     Uses showSaveFilePicker WritableStream when available (iOS 17+, Chrome).
-     Each sample is read from disk one-by-one and piped straight to disk —
-     peak RAM = one sample (~few hundred KB) instead of the whole output file. */
-  /* ── streamSave: pipe source file slices directly to FileSystemWritableFileStream
-     Peak RAM ≈ one 4 MB read-buffer + moov (~30 MB total).
-     Uses File.prototype.stream() + TransformStream on iOS 17+ / Chrome.
-     Falls back to chunked FileReader on older browsers.                    ── */
-  async function streamSave(ftypBox, newMoovBox, mdatHeader, orderedSamples) {
-    if (!window.showSaveFilePicker) {
-      showToast('此瀏覽器不支援串流存檔，請改用 iOS 17+ Safari');
-      return false;
+  /* ── SW streaming download ──
+     Builds a ReadableStream that reads the source file 4 MB at a time,
+     registers it with the Service Worker, then clicks a link to /~dl/<token>.
+     Safari iOS receives it as a normal file download — peak RAM ≈ 4 MB.     */
+  async function swStreamSave(ftypBox, newMoovBox, mdatHeader, orderedSamples) {
+    const sw = navigator.serviceWorker && navigator.serviceWorker.controller;
+    if (!sw) return false; // SW not ready
+
+    const READ_CHUNK = 4 * 1024 * 1024;
+    const totalBytes = orderedSamples.reduce((s, r) => s + r.size, 0);
+    const totalSize  = ftypBox.byteLength + newMoovBox.byteLength + mdatHeader.byteLength + totalBytes;
+
+    // Merge consecutive sample regions to reduce FileReader calls
+    const regions = [];
+    for (const { fileStart, size } of orderedSamples) {
+      const last = regions[regions.length - 1];
+      if (last && fileStart <= last.end + 1) {
+        last.end = Math.max(last.end, fileStart + size);
+      } else {
+        regions.push({ start: fileStart, end: fileStart + size });
+      }
     }
-    let handle;
-    try {
-      handle = await showSaveFilePicker({
-        suggestedName: filename,
-        types: [{ description: 'Video', accept: { [mimeType]: ['.' + ext] } }]
-      });
-    } catch(err) {
-      if (err && err.name === 'AbortError') return false;
-      throw err;
-    }
 
-    const writable = await handle.createWritable();
-    try {
-      // 1. Write ftyp + moov + mdat-box-header (at most ~30 MB, written once)
-      await writable.write(ftypBox);
-      await writable.write(newMoovBox);
-      await writable.write(mdatHeader);
+    let resolveReady, rejectReady;
+    const ready = new Promise((res, rej) => { resolveReady = res; rejectReady = rej; });
 
-      // 2. Stream mdat sample data in 4 MB read-chunks
-      //    orderedSamples = [{fileStart, size}] — numbers only, no buffered data
-      const READ_CHUNK = 4 * 1024 * 1024; // 4 MB per FileReader call
-      const total = orderedSamples.length;
+    const stream = new ReadableStream({
+      async start(controller) {
+        resolveReady(); // signal stream is ready before enqueueing
+        try {
+          controller.enqueue(ftypBox);
+          controller.enqueue(newMoovBox);
+          controller.enqueue(mdatHeader);
 
-      // Merge consecutive / overlapping samples into contiguous file ranges
-      // so we do one FileReader call per contiguous region instead of per-sample
-      const regions = [];
-      for (const { fileStart, size } of orderedSamples) {
-        const last = regions[regions.length - 1];
-        if (last && fileStart <= last.end + 1) {
-          last.end = Math.max(last.end, fileStart + size);
-        } else {
-          regions.push({ start: fileStart, end: fileStart + size });
+          let writtenBytes = 0;
+          for (const region of regions) {
+            let pos = region.start;
+            while (pos < region.end) {
+              if (exportCancelled) { controller.close(); return; }
+              const sliceEnd = Math.min(pos + READ_CHUNK, region.end);
+              const buf = await new Promise((res, rej) => {
+                const r = new FileReader();
+                r.onload = ev => res(ev.target.result);
+                r.onerror = () => rej(new Error('讀取失敗 @ ' + pos));
+                r.readAsArrayBuffer(currentFile.slice(pos, sliceEnd));
+              });
+              controller.enqueue(new Uint8Array(buf));
+              writtenBytes += sliceEnd - pos;
+              pos = sliceEnd;
+              exportProgressF.style.width = Math.round(68 + 30 * writtenBytes / totalBytes) + '%';
+              exportStatus.textContent = `寫入 ${Math.round(100 * writtenBytes / totalBytes)}%…`;
+              // yield so Safari can flush the enqueued chunk before we read more
+              await new Promise(r => setTimeout(r, 0));
+            }
+          }
+          controller.close();
+        } catch(err) {
+          controller.error(err);
         }
       }
+    });
 
-      // Build a lookup: for each region, what contiguous byte range covers it
-      // Then pipe that range to writable in READ_CHUNK pieces
-      let writtenBytes = 0;
-      const totalBytes = orderedSamples.reduce((s, r) => s + r.size, 0);
+    // Register stream with SW before navigating
+    const token = Date.now().toString(36) + Math.random().toString(36).slice(2);
+    sw.postMessage({ type: 'STREAM_REGISTER', token, stream }, [stream]);
 
-      for (const region of regions) {
-        if (exportCancelled) { await writable.abort(); return false; }
-        let pos = region.start;
-        while (pos < region.end) {
-          if (exportCancelled) { await writable.abort(); return false; }
-          const sliceEnd = Math.min(pos + READ_CHUNK, region.end);
-          const buf = await new Promise((res, rej) => {
-            const r = new FileReader();
-            r.onload = ev => res(ev.target.result);
-            r.onerror = () => rej(new Error('讀取失敗 @ ' + pos));
-            r.readAsArrayBuffer(currentFile.slice(pos, sliceEnd));
-          });
-          await writable.write(new Uint8Array(buf));
-          writtenBytes += sliceEnd - pos;
-          pos = sliceEnd;
-          exportProgressF.style.width = Math.round(68 + 30 * writtenBytes / totalBytes) + '%';
-          exportStatus.textContent = `寫入 ${Math.round(100 * writtenBytes / totalBytes)}%…`;
-          await new Promise(r => setTimeout(r, 0)); // yield to UI thread
-        }
-      }
+    // Construct download URL
+    const params = new URLSearchParams({ filename, mime: mimeType, size: totalSize });
+    const dlUrl = `/~dl/${token}?${params}`;
 
-      await writable.close();
-      return true;
-    } catch(err) {
-      try { await writable.abort(); } catch(_) {}
-      throw err;
-    }
+    const a = document.createElement('a');
+    a.href = dlUrl; a.download = filename;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    return true;
   }
 
   try {
@@ -2103,17 +2097,39 @@ document.getElementById('loop-export').addEventListener('click', async e => {
         exportStatus.textContent = msg;
       });
       if (exportCancelled) { exportOverlay.classList.remove('show'); return; }
+
       exportProgressF.style.width = '68%';
       exportStatus.textContent = '寫入影片…';
 
-      const { ftypBox, newMoovBox, mdatHeader, orderedSamples, mdatPayloadSize } = result;
-      const ok = await streamSave(ftypBox, newMoovBox, mdatHeader, orderedSamples, orderedSamples.length);
-      if (!ok) { exportOverlay.classList.remove('show'); return; }
+      const { ftypBox, newMoovBox, mdatHeader, orderedSamples } = result;
+
+      const usedSW = await swStreamSave(ftypBox, newMoovBox, mdatHeader, orderedSamples);
+      if (!usedSW) {
+        // SW not ready fallback: build Blob normally (may OOM on very large clips)
+        exportStatus.textContent = '組合中…';
+        showToast('SW 未就緒，改用一般下載');
+        const parts = [ftypBox, newMoovBox, mdatHeader];
+        for (const { fileStart, size } of orderedSamples) {
+          const chunk = await new Promise((res, rej) => {
+            const r = new FileReader();
+            r.onload = ev => res(new Uint8Array(ev.target.result));
+            r.onerror = () => rej(new Error('讀取失敗 @ ' + fileStart));
+            r.readAsArrayBuffer(currentFile.slice(fileStart, fileStart + size));
+          });
+          parts.push(chunk);
+        }
+        const blob = new Blob(parts, { type: mimeType });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url; a.download = filename;
+        document.body.appendChild(a); a.click(); document.body.removeChild(a);
+        setTimeout(() => URL.revokeObjectURL(url), 15000);
+      }
 
       exportProgressF.style.width = '100%';
       exportStatus.textContent = '完成！';
       setTimeout(() => exportOverlay.classList.remove('show'), 1400);
-      showToast(window.showSaveFilePicker ? '剪輯完成（串流寫入）' : '剪輯完成');
+      showToast('剪輯完成');
 
     } else {
       exportStatus.textContent = '即時錄製模式…';
