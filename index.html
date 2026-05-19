@@ -1536,47 +1536,39 @@ async function trimMp4(file, startSec, endSec, onProgress) {
   /* ── locate moov by scanning top-level boxes ── */
   onProgress(0.05, '掃描 moov…');
   async function findMoov() {
-    /* Read only 16 bytes at a time to get box header, then jump by boxSize.
-       Never reads mdat content. Handles files of any size safely.       */
-    let pos = 0;
-    while (pos < fileSize) {
-      if (exportCancelled) throw new Error('cancelled');
-      if (pos < 0 || pos >= fileSize) break; // safety guard
-      const hdrSize = Math.min(16, fileSize - pos); // enough for size+name+ext64
-      const hdrBuf  = await readSlice(pos, pos + hdrSize);
-      const hdrView = new DataView(hdrBuf);
-      if (hdrBuf.byteLength < 8) break;
-
-      let boxSize = hdrView.getUint32(0, false);
-      const boxName = String.fromCharCode(
-        hdrView.getUint8(4), hdrView.getUint8(5),
-        hdrView.getUint8(6), hdrView.getUint8(7)
-      );
-
-      if (boxSize === 1) {
-        // 64-bit extended size
-        if (hdrBuf.byteLength < 16) break;
-        const hi = hdrView.getUint32(8,  false);
-        const lo = hdrView.getUint32(12, false);
-        boxSize = hi * 0x100000000 + lo;
-      } else if (boxSize === 0) {
-        // box runs to EOF
-        boxSize = fileSize - pos;
+    const HDR=8; let pos=0;
+    while(pos+HDR<=fileSize){
+      if(exportCancelled) throw new Error('cancelled');
+      const chunkEnd=Math.min(pos+4*1024*1024,fileSize);
+      const buf=await readSlice(pos,chunkEnd);
+      const view=new DataView(buf);
+      let localOff=0;
+      while(localOff+HDR<=buf.byteLength){
+        let boxSize=view.getUint32(localOff,false);
+        const boxName=String.fromCharCode(view.getUint8(localOff+4),view.getUint8(localOff+5),view.getUint8(localOff+6),view.getUint8(localOff+7));
+        let hs=8;
+        if(boxSize===1){
+          if(localOff+16>buf.byteLength)break;
+          boxSize=view.getUint32(localOff+8,false)*0x100000000+view.getUint32(localOff+12,false);
+          hs=16;
+        } else if(boxSize===0){
+          boxSize=fileSize-(pos+localOff);
+        }
+        if(boxSize<hs)break;
+        if(boxName==='moov'){
+          const moovStart=pos+localOff;
+          const moovEnd2=moovStart+boxSize;
+          if(moovEnd2>fileSize) throw new Error('moov 超出檔案大小');
+          onProgress(0.08,'讀取 moov…');
+          const moovBuf=await readSlice(moovStart,moovEnd2);
+          return {moovStart,moovBuf};
+        }
+        const absBoxEnd=pos+localOff+boxSize;
+        if(absBoxEnd>fileSize||boxSize>fileSize)break;
+        if(absBoxEnd>chunkEnd-HDR){pos=absBoxEnd;localOff=buf.byteLength;}
+        else localOff+=boxSize;
       }
-
-      // Sanity checks
-      if (boxSize < 8 || boxSize > fileSize) break;
-
-      if (boxName === 'moov') {
-        const moovEnd2 = pos + boxSize;
-        if (moovEnd2 > fileSize) throw new Error('moov 超出檔案大小');
-        onProgress(0.08, '讀取 moov…');
-        const moovBuf = await readSlice(pos, moovEnd2);
-        return { moovStart: pos, moovBuf };
-      }
-
-      // Skip this box entirely — jump to next
-      pos += boxSize;
+      if(pos<=chunkEnd) pos=chunkEnd;
     }
     throw new Error('找不到 moov box（可能不是標準 MP4/MOV 格式）');
   }
@@ -2039,6 +2031,32 @@ document.getElementById('loop-export').addEventListener('click', async e => {
   const ss   = loopIn.toFixed(3);
   const mimeType = ext === 'mov' ? 'video/quicktime' : 'video/mp4';
 
+  const canSave = !!window.showSaveFilePicker;
+
+  async function saveBlob(blob, filename) {
+    if (canSave) {
+      try {
+        const handle = await showSaveFilePicker({
+          suggestedName: filename,
+          types: [{ description: 'Video', accept: { [mimeType]: ['.' + ext] } }]
+        });
+        const writable = await handle.createWritable();
+        await writable.write(blob);
+        await writable.close();
+        return true;
+      } catch (err) {
+        if (err && err.name === 'AbortError') return false;
+        throw err;
+      }
+    }
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = filename;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 8000);
+    return true;
+  }
+
   try {
     if (['mp4','mov','m4v'].includes(ext)) {
       const result = await trimMp4(currentFile, loopIn, loopOut, (ratio, msg) => {
@@ -2048,114 +2066,25 @@ document.getElementById('loop-export').addEventListener('click', async e => {
       });
       if (exportCancelled) { exportOverlay.classList.remove('show'); return; }
 
-      exportProgressF.style.width = '96%';
+      exportProgressF.style.width = '98%';
+      exportStatus.textContent = '儲存中…';
 
-      // ── Determine total output size ──
-      let totalSize = 0;
-      let header = null; // ftyp + moov + mdat-size-box (Uint8Array or Blob)
-      let parts  = [];   // array of Uint8Array sample chunks
-
-      if (result instanceof Blob) {
-        // Legacy path: already a single Blob (small clips)
-        totalSize = result.size;
-        if (totalSize <= CHUNK_BYTES) {
-          exportStatus.textContent = '下載中…';
-          const url = URL.createObjectURL(result);
-          const a = document.createElement('a');
-          a.href = url; a.download = `${base}_clip_${ss.replace('.','_')}.${ext}`;
-          document.body.appendChild(a); a.click(); document.body.removeChild(a);
-          setTimeout(() => URL.revokeObjectURL(url), 8000);
-          exportProgressF.style.width = '100%'; exportStatus.textContent = '完成！';
-          setTimeout(() => exportOverlay.classList.remove('show'), 1400);
-          showToast('剪輯完成');
-          return;
-        }
-        // Large blob: slice into chunks
-        let partNum = 1; let offset = 0;
-        const totalParts = Math.ceil(totalSize / CHUNK_BYTES);
-        while (offset < totalSize) {
-          if (exportCancelled) break;
-          const slice = result.slice(offset, offset + CHUNK_BYTES, mimeType);
-          const url = URL.createObjectURL(slice);
-          const a = document.createElement('a');
-          const suffix = totalParts > 1 ? `_part${String(partNum).padStart(2,'0')}` : '';
-          a.href = url; a.download = `${base}_clip_${ss.replace('.','_')}${suffix}.${ext}`;
-          document.body.appendChild(a); a.click(); document.body.removeChild(a);
-          setTimeout(() => URL.revokeObjectURL(url), 8000);
-          exportStatus.textContent = `下載 part ${partNum}/${totalParts}…`;
-          exportProgressF.style.width = Math.round(96 + 4*partNum/totalParts) + '%';
-          partNum++; offset += CHUNK_BYTES;
-          await new Promise(r => setTimeout(r, 800)); // let Safari flush
-        }
-      } else if (result && result.mdatParts) {
-        // Structured path: {ftypBox, newMoovBox, mdatHeader, mdatParts, mdatPayloadSize}
-        const { ftypBox, newMoovBox, mdatHeader, mdatParts, mdatPayloadSize } = result;
-        const headerBlob = new Blob([ftypBox, newMoovBox, mdatHeader], { type: mimeType });
-        totalSize = headerBlob.size + mdatPayloadSize;
-        const totalParts = Math.max(1, Math.ceil(totalSize / CHUNK_BYTES));
-
-        if (totalParts === 1) {
-          // Small enough: single file
-          const singleBlob = new Blob([ftypBox, newMoovBox, mdatHeader, ...mdatParts], { type: mimeType });
-          exportStatus.textContent = '下載中…';
-          const url = URL.createObjectURL(singleBlob);
-          const a = document.createElement('a');
-          a.href = url; a.download = `${base}_clip_${ss.replace('.','_')}.${ext}`;
-          document.body.appendChild(a); a.click(); document.body.removeChild(a);
-          setTimeout(() => URL.revokeObjectURL(url), 8000);
-          exportProgressF.style.width = '100%'; exportStatus.textContent = '完成！';
-          setTimeout(() => exportOverlay.classList.remove('show'), 1400);
-          showToast('剪輯完成（免 FFmpeg）');
-          return;
-        }
-
-        // Multi-part: first part gets ftyp+moov+mdat header + as many samples as fit
-        // Subsequent parts get raw mdat continuation (note: these won't be independently seekable
-        // but can be reassembled with cat/ffmpeg on desktop)
-        let partNum = 1;
-        let buf = [ftypBox, newMoovBox, mdatHeader]; // part 1 always starts with header
-        let bufSize = headerBlob.size;
-
-        const downloadPart = async (blobs, pNum, pTotal) => {
-          const blob = new Blob(blobs, { type: mimeType });
-          const url = URL.createObjectURL(blob);
-          const a = document.createElement('a');
-          a.href = url;
-          a.download = `${base}_clip_${ss.replace('.','_')}_part${String(pNum).padStart(2,'0')}of${pTotal}.${ext}`;
-          document.body.appendChild(a); a.click(); document.body.removeChild(a);
-          exportStatus.textContent = `下載 part ${pNum}/${pTotal}…`;
-          exportProgressF.style.width = Math.round(96 + 4*pNum/pTotal) + '%';
-          await new Promise(r => setTimeout(r, 1000));
-          URL.revokeObjectURL(url);
-        };
-
-        for (let i = 0; i < mdatParts.length; i++) {
-          if (exportCancelled) break;
-          const chunk = mdatParts[i];
-          if (bufSize + chunk.byteLength > CHUNK_BYTES && buf.length > (partNum===1?3:0)) {
-            await downloadPart(buf, partNum, totalParts);
-            partNum++;
-            buf = [chunk]; bufSize = chunk.byteLength;
-          } else {
-            buf.push(chunk); bufSize += chunk.byteLength;
-          }
-        }
-        if (buf.length && !exportCancelled) {
-          await downloadPart(buf, partNum, totalParts);
-        }
+      let blob = result;
+      if (result && result.mdatParts) {
+        const { ftypBox, newMoovBox, mdatHeader, mdatParts } = result;
+        blob = new Blob([ftypBox, newMoovBox, mdatHeader, ...mdatParts], { type: mimeType });
       }
 
-      if (!exportCancelled) {
-        exportProgressF.style.width = '100%'; exportStatus.textContent = '完成！';
-        setTimeout(() => exportOverlay.classList.remove('show'), 1400);
-        const parts2 = Math.ceil(totalSize / CHUNK_BYTES);
-        showToast(parts2 > 1 ? `剪輯完成，共 ${parts2} 個分段檔` : '剪輯完成（免 FFmpeg）');
-      } else {
-        exportOverlay.classList.remove('show');
-      }
+      const filename = `${base}_clip_${ss.replace('.','_')}.${ext}`;
+      const ok = await saveBlob(blob, filename);
+      if (!ok) { exportOverlay.classList.remove('show'); return; }
+
+      exportProgressF.style.width = '100%';
+      exportStatus.textContent = '完成！';
+      setTimeout(() => exportOverlay.classList.remove('show'), 1400);
+      showToast('剪輯完成');
 
     } else {
-      // ── MediaRecorder fallback (non-MP4) ──
       exportStatus.textContent = '即時錄製模式…';
       exportProgressF.style.width = '5%';
       const { blob, ext: outExt } = await trimByMediaRecorder(loopIn, loopOut, (ratio, msg) => {
@@ -2163,12 +2092,11 @@ document.getElementById('loop-export').addEventListener('click', async e => {
         exportStatus.textContent = msg;
       });
       if (exportCancelled) { exportOverlay.classList.remove('show'); return; }
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url; a.download = `${base}_clip_${ss.replace('.','_')}.${outExt}`;
-      document.body.appendChild(a); a.click(); document.body.removeChild(a);
-      setTimeout(() => URL.revokeObjectURL(url), 8000);
-      exportProgressF.style.width = '100%'; exportStatus.textContent = '完成！';
+      const filename = `${base}_clip_${ss.replace('.','_')}.${outExt}`;
+      const ok = await saveBlob(blob, filename);
+      if (!ok) { exportOverlay.classList.remove('show'); return; }
+      exportProgressF.style.width = '100%';
+      exportStatus.textContent = '完成！';
       setTimeout(() => exportOverlay.classList.remove('show'), 1400);
       showToast('剪輯完成');
     }
@@ -2177,7 +2105,6 @@ document.getElementById('loop-export').addEventListener('click', async e => {
     if (err.message !== 'cancelled') showToast('剪輯失敗：' + (err.message || err));
   }
 });
-
 exportCancelBtn.addEventListener('click', () => {
   exportCancelled = true;
   exportOverlay.classList.remove('show');
