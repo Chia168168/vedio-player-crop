@@ -1716,28 +1716,10 @@ async function trimMp4(file, startSec, endSec, onProgress) {
     else merged.push({...r});
   }
 
-  /* ── read needed mdat slices ── */
-  onProgress(0.35,'讀取影片資料…');
-  const totalBytes=merged.reduce((s,r)=>s+(r.end-r.start),0);
-  const rangeBuffers=new Map(); let readBytes=0;
-  for(const r of merged){
-    if(exportCancelled)throw new Error('cancelled');
-    const buf=await readSlice(r.start,r.end);
-    rangeBuffers.set(r.start,buf);
-    readBytes+=r.end-r.start;
-    onProgress(0.35+0.30*readBytes/totalBytes,'讀取影片資料…');
-  }
-  function getSampleData(fileOff,size){
-    for(const[rs,buf]of rangeBuffers){
-      if(fileOff>=rs&&fileOff+size<=rs+buf.byteLength)
-        return new Uint8Array(buf,fileOff-rs,size);
-    }
-    throw new Error('Sample data not found @ '+fileOff);
-  }
-
-  /* ── build mdat ── */
-  onProgress(0.68,'重建 moov…');
-  const mdatChunks=[]; const newChunkOffsets={};
+  /* ── build ordered sample list (no data read yet — stream later) ── */
+  onProgress(0.35,'計算輸出…');
+  const orderedSamples=[]; // [{fileStart, size}] in output order
+  const newChunkOffsets={};
   let mdatOffset=0;
   for(let ti=0;ti<tracks.length;ti++)newChunkOffsets[ti]=[];
   for(let ti=0;ti<tracks.length;ti++){
@@ -1745,12 +1727,11 @@ async function trimMp4(file, startSec, endSec, onProgress) {
     if(track._first===undefined)continue;
     for(let i=track._first;i<=track._last;i++){
       newChunkOffsets[ti].push(mdatOffset);
-      const d=getSampleData(track.sampleOffsets[i],track.sizes[i]);
-      mdatChunks.push(d); mdatOffset+=track.sizes[i];
+      orderedSamples.push({fileStart:track.sampleOffsets[i],size:track.sizes[i]});
+      mdatOffset+=track.sizes[i];
     }
   }
-  const mdatParts=mdatChunks;
-  const mdatPayloadSize=mdatChunks.reduce((s,a)=>s+a.byteLength,0);
+  const mdatPayloadSize=orderedSamples.reduce((s,r)=>s+r.size,0);
 
   /* ── grab ftyp ── */
   const ftypRaw=await readSlice(0,Math.min(512,fileSize));
@@ -1971,7 +1952,7 @@ async function trimMp4(file, startSec, endSec, onProgress) {
   const mdatHeader=new Uint8Array(8);
   wu32(mdatHeader,0,8+mdatPayloadSize);
   'mdat'.split('').forEach((c,i)=>mdatHeader[4+i]=c.charCodeAt(0));
-  return { ftypBox, newMoovBox, mdatHeader, mdatParts, mdatPayloadSize };
+  return { ftypBox, newMoovBox, mdatHeader, orderedSamples, mdatPayloadSize };
 }
 
 /* ═══════════════════════════════════════════════
@@ -2026,34 +2007,83 @@ document.getElementById('loop-export').addEventListener('click', async e => {
   exportStatus.textContent = '準備中…';
   exportProgressF.style.width = '0%';
 
-  const ext  = currentFile.name.split('.').pop().toLowerCase();
-  const base = currentFile.name.replace(/\.[^.]+$/, '') || 'clip';
-  const ss   = loopIn.toFixed(3);
+  const ext      = currentFile.name.split('.').pop().toLowerCase();
+  const base     = currentFile.name.replace(/\.[^.]+$/, '') || 'clip';
+  const ss       = loopIn.toFixed(3);
   const mimeType = ext === 'mov' ? 'video/quicktime' : 'video/mp4';
+  const filename = `${base}_clip_${ss.replace('.','_')}.${ext}`;
 
-  const canSave = !!window.showSaveFilePicker;
+  /* ── streaming write helper ──
+     Uses showSaveFilePicker WritableStream when available (iOS 17+, Chrome).
+     Each sample is read from disk one-by-one and piped straight to disk —
+     peak RAM = one sample (~few hundred KB) instead of the whole output file. */
+  async function streamSave(ftypBox, newMoovBox, mdatHeader, orderedSamples, totalSamples) {
+    const canPicker = !!window.showSaveFilePicker;
 
-  async function saveBlob(blob, filename) {
-    if (canSave) {
+    if (canPicker) {
+      let handle;
       try {
-        const handle = await showSaveFilePicker({
+        handle = await showSaveFilePicker({
           suggestedName: filename,
           types: [{ description: 'Video', accept: { [mimeType]: ['.' + ext] } }]
         });
-        const writable = await handle.createWritable();
-        await writable.write(blob);
-        await writable.close();
-        return true;
-      } catch (err) {
+      } catch(err) {
         if (err && err.name === 'AbortError') return false;
         throw err;
       }
+      const writable = await handle.createWritable();
+      // Write header (tiny — ftyp + moov + mdat-size-box, total ~20-40 KB)
+      await writable.write(new Blob([ftypBox, newMoovBox, mdatHeader]));
+      // Stream each sample individually — only one sample in RAM at a time
+      for (let i = 0; i < orderedSamples.length; i++) {
+        if (exportCancelled) { await writable.abort(); return false; }
+        const { fileStart, size } = orderedSamples[i];
+        const chunk = await new Promise((res, rej) => {
+          const r = new FileReader();
+          r.onload = ev => res(new Uint8Array(ev.target.result));
+          r.onerror = () => rej(new Error('讀取失敗 @ ' + fileStart));
+          r.readAsArrayBuffer(currentFile.slice(fileStart, fileStart + size));
+        });
+        await writable.write(chunk);
+        if (i % 30 === 0) {
+          exportProgressF.style.width = Math.round(68 + 30 * i / orderedSamples.length) + '%';
+          exportStatus.textContent = `寫入 ${Math.round(100*i/orderedSamples.length)}%…`;
+          await new Promise(r => setTimeout(r, 0)); // yield to UI
+        }
+      }
+      await writable.close();
+      return true;
     }
+
+    // Fallback: no picker — build Blob in 20-sample chunks to limit peak RAM
+    // Each chunk is downloaded as soon as it's written, but since we can't
+    // stream to a single file via <a download>, we must buffer the whole thing.
+    // For very large files on older iOS this may still crash; the user should
+    // use a browser that supports showSaveFilePicker.
+    exportStatus.textContent = '組合中（建議用 iOS 17+ Safari）…';
+    const BATCH = 200;
+    const parts = [ftypBox, newMoovBox, mdatHeader];
+    for (let i = 0; i < orderedSamples.length; i++) {
+      if (exportCancelled) return false;
+      const { fileStart, size } = orderedSamples[i];
+      const chunk = await new Promise((res, rej) => {
+        const r = new FileReader();
+        r.onload = ev => res(new Uint8Array(ev.target.result));
+        r.onerror = () => rej(new Error('讀取失敗 @ ' + fileStart));
+        r.readAsArrayBuffer(currentFile.slice(fileStart, fileStart + size));
+      });
+      parts.push(chunk);
+      if (i % BATCH === 0) {
+        exportProgressF.style.width = Math.round(68 + 30 * i / orderedSamples.length) + '%';
+        await new Promise(r => setTimeout(r, 0));
+      }
+    }
+    const blob = new Blob(parts, { type: mimeType });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url; a.download = filename;
     document.body.appendChild(a); a.click(); document.body.removeChild(a);
-    setTimeout(() => URL.revokeObjectURL(url), 8000);
+    setTimeout(() => URL.revokeObjectURL(url), 15000);
     return true;
   }
 
@@ -2065,24 +2095,17 @@ document.getElementById('loop-export').addEventListener('click', async e => {
         exportStatus.textContent = msg;
       });
       if (exportCancelled) { exportOverlay.classList.remove('show'); return; }
+      exportProgressF.style.width = '68%';
+      exportStatus.textContent = '寫入影片…';
 
-      exportProgressF.style.width = '98%';
-      exportStatus.textContent = '儲存中…';
-
-      let blob = result;
-      if (result && result.mdatParts) {
-        const { ftypBox, newMoovBox, mdatHeader, mdatParts } = result;
-        blob = new Blob([ftypBox, newMoovBox, mdatHeader, ...mdatParts], { type: mimeType });
-      }
-
-      const filename = `${base}_clip_${ss.replace('.','_')}.${ext}`;
-      const ok = await saveBlob(blob, filename);
+      const { ftypBox, newMoovBox, mdatHeader, orderedSamples, mdatPayloadSize } = result;
+      const ok = await streamSave(ftypBox, newMoovBox, mdatHeader, orderedSamples, orderedSamples.length);
       if (!ok) { exportOverlay.classList.remove('show'); return; }
 
       exportProgressF.style.width = '100%';
       exportStatus.textContent = '完成！';
       setTimeout(() => exportOverlay.classList.remove('show'), 1400);
-      showToast('剪輯完成');
+      showToast(window.showSaveFilePicker ? '剪輯完成（串流寫入）' : '剪輯完成');
 
     } else {
       exportStatus.textContent = '即時錄製模式…';
@@ -2092,9 +2115,11 @@ document.getElementById('loop-export').addEventListener('click', async e => {
         exportStatus.textContent = msg;
       });
       if (exportCancelled) { exportOverlay.classList.remove('show'); return; }
-      const filename = `${base}_clip_${ss.replace('.','_')}.${outExt}`;
-      const ok = await saveBlob(blob, filename);
-      if (!ok) { exportOverlay.classList.remove('show'); return; }
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = `${base}_clip_${ss.replace('.','_')}.${outExt}`;
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 8000);
       exportProgressF.style.width = '100%';
       exportStatus.textContent = '完成！';
       setTimeout(() => exportOverlay.classList.remove('show'), 1400);
@@ -2105,6 +2130,7 @@ document.getElementById('loop-export').addEventListener('click', async e => {
     if (err.message !== 'cancelled') showToast('剪輯失敗：' + (err.message || err));
   }
 });
+
 exportCancelBtn.addEventListener('click', () => {
   exportCancelled = true;
   exportOverlay.classList.remove('show');
