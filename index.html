@@ -2073,56 +2073,52 @@ document.getElementById('loop-export').addEventListener('click', async e => {
       }
     }
 
-    let resolveReady, rejectReady;
-    const ready = new Promise((res, rej) => { resolveReady = res; rejectReady = rej; });
 
-    const stream = new ReadableStream({
-      async start(controller) {
-        resolveReady(); // signal stream is ready before enqueueing
-        try {
-          controller.enqueue(ftypBox);
-          controller.enqueue(newMoovBox);
-          controller.enqueue(mdatHeader);
+    // Set up MessageChannel — SW pulls data via port1, we push via port2
+    const token = Date.now().toString(36) + Math.random().toString(36).slice(2);
+    const { port1, port2 } = new MessageChannel();
 
-          let writtenBytes = 0;
-          for (const region of regions) {
-            let pos = region.start;
-            while (pos < region.end) {
-              if (exportCancelled) { controller.close(); return; }
-              const sliceEnd = Math.min(pos + READ_CHUNK, region.end);
-              const buf = await new Promise((res, rej) => {
-                const r = new FileReader();
-                r.onload = ev => res(ev.target.result);
-                r.onerror = () => rej(new Error('讀取失敗 @ ' + pos));
-                r.readAsArrayBuffer(currentFile.slice(pos, sliceEnd));
-              });
-              controller.enqueue(new Uint8Array(buf));
-              writtenBytes += sliceEnd - pos;
-              pos = sliceEnd;
-              exportProgressF.style.width = Math.round(68 + 30 * writtenBytes / totalBytes) + '%';
-              exportStatus.textContent = `寫入 ${Math.round(100 * writtenBytes / totalBytes)}%…`;
-              // yield so Safari can flush the enqueued chunk before we read more
-              await new Promise(r => setTimeout(r, 0));
-            }
-          }
-          controller.close();
-        } catch(err) {
-          controller.error(err);
-        }
-      }
+    // Register with SW: send port1 so SW can receive chunks
+    sw.postMessage(
+      { type: 'STREAM_REGISTER', token, filename, mime: mimeType, size: totalSize },
+      [port1]
+    );
+
+    // Wait for SW to signal ready before we start pumping data
+    await new Promise(res => {
+      port2.onmessage = e => { if (e.data === 'ready') res(); };
     });
 
-    // Register stream with SW before navigating
-    const token = Date.now().toString(36) + Math.random().toString(36).slice(2);
-    sw.postMessage({ type: 'STREAM_REGISTER', token, stream }, [stream]);
-
-    // Construct download URL
-    const params = new URLSearchParams({ filename, mime: mimeType, size: totalSize });
+    // Click the download link (SW will intercept and stream the Response)
+    const params = new URLSearchParams({ filename, mime: mimeType });
     const dlUrl = `/~dl/${token}?${params}`;
-
     const a = document.createElement('a');
     a.href = dlUrl; a.download = filename;
     document.body.appendChild(a); a.click(); document.body.removeChild(a);
+
+    // Now pump data: read 4 MB at a time, send ArrayBuffer via port2
+    const READ_CHUNK2 = 4 * 1024 * 1024;
+    let writtenBytes = 0;
+    for (const region of regions) {
+      let pos = region.start;
+      while (pos < region.end) {
+        if (exportCancelled) { port2.postMessage(null); return false; }
+        const sliceEnd = Math.min(pos + READ_CHUNK2, region.end);
+        const buf = await new Promise((res, rej) => {
+          const r = new FileReader();
+          r.onload = ev => res(ev.target.result);
+          r.onerror = () => rej(new Error('讀取失敗 @ ' + pos));
+          r.readAsArrayBuffer(currentFile.slice(pos, sliceEnd));
+        });
+        port2.postMessage(buf, [buf]);  // transfer ArrayBuffer — zero copy
+        writtenBytes += sliceEnd - pos;
+        pos = sliceEnd;
+        exportProgressF.style.width = Math.round(68 + 30 * writtenBytes / totalBytes) + '%';
+        exportStatus.textContent = `寫入 ${Math.round(100 * writtenBytes / totalBytes)}%…`;
+        await new Promise(r => setTimeout(r, 0)); // yield to UI
+      }
+    }
+    port2.postMessage(null); // signal done
     return true;
   }
 
