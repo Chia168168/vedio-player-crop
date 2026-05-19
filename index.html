@@ -462,28 +462,11 @@
 </style>
 
 <script>
-/* ── Service Worker registration + controller-ready wait ── */
-(function() {
-  if (!('serviceWorker' in navigator)) return;
+/* Register Service Worker for COI headers (SharedArrayBuffer support) */
+if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('./sw.js', { scope: './' })
-    .then(reg => {
-      // If a new SW is installing (first visit), wait for it to activate then reload
-      // so navigator.serviceWorker.controller is set before the user exports.
-      const sw = reg.installing || reg.waiting;
-      if (sw) {
-        sw.addEventListener('statechange', function() {
-          if (sw.state === 'activated') {
-            // reload once so controller is set
-            if (!sessionStorage.getItem('sw_reloaded')) {
-              sessionStorage.setItem('sw_reloaded', '1');
-              location.reload();
-            }
-          }
-        });
-      }
-    })
-    .catch(err => console.warn('SW registration failed:', err));
-})();
+    .catch(err => console.warn('SW:', err));
+}
 </script>
 </head>
 <body>
