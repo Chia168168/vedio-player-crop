@@ -460,6 +460,31 @@
   }
   #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
 </style>
+
+<script>
+/* ── Service Worker registration + controller-ready wait ── */
+(function() {
+  if (!('serviceWorker' in navigator)) return;
+  navigator.serviceWorker.register('./sw.js', { scope: './' })
+    .then(reg => {
+      // If a new SW is installing (first visit), wait for it to activate then reload
+      // so navigator.serviceWorker.controller is set before the user exports.
+      const sw = reg.installing || reg.waiting;
+      if (sw) {
+        sw.addEventListener('statechange', function() {
+          if (sw.state === 'activated') {
+            // reload once so controller is set
+            if (!sessionStorage.getItem('sw_reloaded')) {
+              sessionStorage.setItem('sw_reloaded', '1');
+              location.reload();
+            }
+          }
+        });
+      }
+    })
+    .catch(err => console.warn('SW registration failed:', err));
+})();
+</script>
 </head>
 <body>
 
@@ -2018,8 +2043,20 @@ document.getElementById('loop-export').addEventListener('click', async e => {
      registers it with the Service Worker, then clicks a link to /~dl/<token>.
      Safari iOS receives it as a normal file download — peak RAM ≈ 4 MB.     */
   async function swStreamSave(ftypBox, newMoovBox, mdatHeader, orderedSamples) {
-    const sw = navigator.serviceWorker && navigator.serviceWorker.controller;
-    if (!sw) return false; // SW not ready
+    // Wait up to 3 seconds for SW controller to become available
+    let sw = navigator.serviceWorker && navigator.serviceWorker.controller;
+    if (!sw && navigator.serviceWorker) {
+      try {
+        await Promise.race([
+          navigator.serviceWorker.ready.then(() => {
+            sw = navigator.serviceWorker.controller;
+          }),
+          new Promise((_, rej) => setTimeout(() => rej(new Error('SW timeout')), 3000))
+        ]);
+      } catch(_) {}
+      sw = navigator.serviceWorker.controller;
+    }
+    if (!sw) return false; // SW still not ready after waiting
 
     const READ_CHUNK = 4 * 1024 * 1024;
     const totalBytes = orderedSamples.reduce((s, r) => s + r.size, 0);
