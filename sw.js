@@ -9,8 +9,47 @@ self.addEventListener('message', e => {
   if (!e.data) return;
   if (e.data.type === 'STREAM_REGISTER') {
     const { token, filename, mime, size } = e.data;
-    // e.ports[0] is the MessagePort we'll pull data from
-    pending.set(token, { port: e.ports[0], filename, mime, size });
+    const port = e.ports[0];
+    const chunks = [];   // buffer chunks that arrive before fetch fires
+    let controller = null;
+    let done = false;
+
+    port.onmessage = ev => {
+      if (ev.data === null) {
+        done = true;
+        if (controller) { controller.close(); port.close(); }
+      } else {
+        const chunk = ev.data instanceof Uint8Array ? ev.data : new Uint8Array(ev.data);
+        if (controller) {
+          controller.enqueue(chunk);
+        } else {
+          chunks.push(chunk); // buffer until ReadableStream is ready
+        }
+      }
+    };
+    port.onmessageerror = () => {
+      if (controller) controller.error(new Error('port error'));
+      port.close();
+    };
+
+    pending.set(token, {
+      filename, mime, size,
+      getStream() {
+        return new ReadableStream({
+          start(ctrl) {
+            controller = ctrl;
+            // flush buffered chunks
+            for (const c of chunks) ctrl.enqueue(c);
+            chunks.length = 0;
+            if (done) { ctrl.close(); port.close(); }
+          },
+          cancel() { port.close(); }
+        });
+      }
+    });
+
+    // Signal ready immediately — main page can start pumping
+    port.postMessage('ready');
   }
 });
 
@@ -21,32 +60,11 @@ self.addEventListener('fetch', event => {
   if (url.pathname.startsWith('/~dl/')) {
     const token = url.pathname.slice(5);
     if (pending.has(token)) {
-      const { port, filename, mime, size } = pending.get(token);
+      const entry = pending.get(token);
       pending.delete(token);
+      const { filename, mime, size } = entry;
 
-      /* Build a ReadableStream driven by messages from the main page */
-      const stream = new ReadableStream({
-        start(controller) {
-          port.onmessage = e => {
-            if (e.data === null) {
-              // null = done
-              controller.close();
-              port.close();
-            } else if (e.data instanceof Uint8Array || e.data instanceof ArrayBuffer) {
-              controller.enqueue(
-                e.data instanceof Uint8Array ? e.data : new Uint8Array(e.data)
-              );
-            }
-          };
-          port.onmessageerror = () => {
-            controller.error(new Error('port error'));
-            port.close();
-          };
-          // Tell main page we're ready to receive
-          port.postMessage('ready');
-        },
-        cancel() { port.close(); }
-      });
+      const stream = entry.getStream();
 
       const headers = { 'Content-Type': mime,
         'Content-Disposition': `attachment; filename="${filename}"` };

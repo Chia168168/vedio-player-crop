@@ -2084,42 +2084,55 @@ document.getElementById('loop-export').addEventListener('click', async e => {
       [port1]
     );
 
-    // Wait for SW to signal ready before we start pumping data
-    await new Promise(res => {
-      port2.onmessage = e => { if (e.data === 'ready') res(); };
+    // Set onmessage BEFORE clicking — SW may send 'ready' any time after fetch fires
+    const pumpPromise = new Promise((resolve, reject) => {
+      port2.onmessage = async e => {
+        if (e.data !== 'ready') return;
+        // SW is ready — start pumping chunks
+        try {
+          // Send ftyp + moov + mdat-header first (small, fine to transfer)
+          port2.postMessage(ftypBox.buffer.slice(ftypBox.byteOffset, ftypBox.byteOffset + ftypBox.byteLength));
+          port2.postMessage(newMoovBox.buffer.slice(newMoovBox.byteOffset, newMoovBox.byteOffset + newMoovBox.byteLength));
+          port2.postMessage(mdatHeader.buffer.slice(mdatHeader.byteOffset, mdatHeader.byteOffset + mdatHeader.byteLength));
+
+          const READ_CHUNK2 = 4 * 1024 * 1024;
+          let writtenBytes = 0;
+          for (const region of regions) {
+            let pos = region.start;
+            while (pos < region.end) {
+              if (exportCancelled) { port2.postMessage(null); resolve(false); return; }
+              const sliceEnd = Math.min(pos + READ_CHUNK2, region.end);
+              const buf = await new Promise((res, rej) => {
+                const r = new FileReader();
+                r.onload = ev => res(ev.target.result);
+                r.onerror = () => rej(new Error('讀取失敗 @ ' + pos));
+                r.readAsArrayBuffer(currentFile.slice(pos, sliceEnd));
+              });
+              port2.postMessage(buf, [buf]); // zero-copy ArrayBuffer transfer
+              writtenBytes += sliceEnd - pos;
+              pos = sliceEnd;
+              exportProgressF.style.width = Math.round(68 + 30 * writtenBytes / totalBytes) + '%';
+              exportStatus.textContent = `寫入 ${Math.round(100 * writtenBytes / totalBytes)}%…`;
+              await new Promise(r => setTimeout(r, 0)); // yield UI
+            }
+          }
+          port2.postMessage(null); // signal end-of-stream
+          resolve(true);
+        } catch(err) {
+          port2.postMessage(null);
+          reject(err);
+        }
+      };
     });
 
-    // Click the download link (SW will intercept and stream the Response)
+    // Now click — this triggers SW fetch which sets up ReadableStream and sends 'ready'
     const params = new URLSearchParams({ filename, mime: mimeType });
     const dlUrl = `/~dl/${token}?${params}`;
     const a = document.createElement('a');
     a.href = dlUrl; a.download = filename;
     document.body.appendChild(a); a.click(); document.body.removeChild(a);
 
-    // Now pump data: read 4 MB at a time, send ArrayBuffer via port2
-    const READ_CHUNK2 = 4 * 1024 * 1024;
-    let writtenBytes = 0;
-    for (const region of regions) {
-      let pos = region.start;
-      while (pos < region.end) {
-        if (exportCancelled) { port2.postMessage(null); return false; }
-        const sliceEnd = Math.min(pos + READ_CHUNK2, region.end);
-        const buf = await new Promise((res, rej) => {
-          const r = new FileReader();
-          r.onload = ev => res(ev.target.result);
-          r.onerror = () => rej(new Error('讀取失敗 @ ' + pos));
-          r.readAsArrayBuffer(currentFile.slice(pos, sliceEnd));
-        });
-        port2.postMessage(buf, [buf]);  // transfer ArrayBuffer — zero copy
-        writtenBytes += sliceEnd - pos;
-        pos = sliceEnd;
-        exportProgressF.style.width = Math.round(68 + 30 * writtenBytes / totalBytes) + '%';
-        exportStatus.textContent = `寫入 ${Math.round(100 * writtenBytes / totalBytes)}%…`;
-        await new Promise(r => setTimeout(r, 0)); // yield to UI
-      }
-    }
-    port2.postMessage(null); // signal done
-    return true;
+    return await pumpPromise;
   }
 
   try {
