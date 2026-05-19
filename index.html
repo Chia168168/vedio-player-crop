@@ -2095,20 +2095,38 @@ document.getElementById('loop-export').addEventListener('click', async e => {
           port2.postMessage(newMoovBox.buffer.slice(newMoovBox.byteOffset, newMoovBox.byteOffset + newMoovBox.byteLength));
           port2.postMessage(mdatHeader.buffer.slice(mdatHeader.byteOffset, mdatHeader.byteOffset + mdatHeader.byteLength));
 
-          const READ_CHUNK2 = 4 * 1024 * 1024;
+          const READ_CHUNK2 = 1 * 1024 * 1024;
           let writtenBytes = 0;
           for (const region of regions) {
             let pos = region.start;
             while (pos < region.end) {
               if (exportCancelled) { port2.postMessage(null); resolve(false); return; }
               const sliceEnd = Math.min(pos + READ_CHUNK2, region.end);
-              const buf = await new Promise((res, rej) => {
-                const r = new FileReader();
-                r.onload = ev => res(ev.target.result);
-                r.onerror = () => rej(new Error('讀取失敗 @ ' + pos));
-                r.readAsArrayBuffer(currentFile.slice(pos, sliceEnd));
-              });
-              port2.postMessage(buf, [buf]); // zero-copy ArrayBuffer transfer
+              // Safari iOS: FileReader may fail on large slices; retry with smaller pieces
+              const sliceSize = sliceEnd - pos;
+              const SUB = 1 * 1024 * 1024; // 1 MB sub-chunks to stay under iOS limit
+              if (sliceSize <= SUB) {
+                const buf = await new Promise((res, rej) => {
+                  const r = new FileReader();
+                  r.onload = ev => res(ev.target.result);
+                  r.onerror = () => rej(new Error('讀取失敗 @ ' + pos));
+                  r.readAsArrayBuffer(currentFile.slice(pos, sliceEnd));
+                });
+                port2.postMessage(buf, [buf]);
+              } else {
+                // split into 1 MB sub-reads and send each individually
+                for (let sub = pos; sub < sliceEnd; sub += SUB) {
+                  if (exportCancelled) { port2.postMessage(null); resolve(false); return; }
+                  const subEnd = Math.min(sub + SUB, sliceEnd);
+                  const buf = await new Promise((res, rej) => {
+                    const r = new FileReader();
+                    r.onload = ev => res(ev.target.result);
+                    r.onerror = () => rej(new Error('讀取失敗 @ ' + sub));
+                    r.readAsArrayBuffer(currentFile.slice(sub, subEnd));
+                  });
+                  port2.postMessage(buf, [buf]);
+                }
+              }
               writtenBytes += sliceEnd - pos;
               pos = sliceEnd;
               exportProgressF.style.width = Math.round(68 + 30 * writtenBytes / totalBytes) + '%';
