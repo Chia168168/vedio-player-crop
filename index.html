@@ -1515,24 +1515,67 @@ async function trimMp4(file, startSec, endSec, onProgress) {
   // ── locate moov ──
   onProgress(0.05, '解析 moov…');
   async function findMoov() {
-    const CHUNK = Math.min(8 * 1024 * 1024, fileSize);
-    for (const [from, to] of [[0, CHUNK], [Math.max(0, fileSize - CHUNK), fileSize]]) {
-      const buf = await readSlice(from, to);
+    // Strategy: scan the top-level box table of the file.
+    // iPhone MOV files typically have moov at the END (after mdat).
+    // We scan in 4 MB header-only chunks (just 8 bytes per box to find size+name,
+    // then jump ahead) so we never load the giant mdat into memory.
+    const HDR = 8; // bytes needed to read box size+name
+    let pos = 0;
+    while (pos + HDR <= fileSize) {
+      if (exportCancelled) throw new Error('cancelled');
+      // Read a small header chunk (4 MB) so we can iterate multiple boxes at once
+      const chunkEnd = Math.min(pos + 4 * 1024 * 1024, fileSize);
+      const buf  = await readSlice(pos, chunkEnd);
       const view = new DataView(buf);
-      let i = 0;
-      while (i + 8 <= buf.byteLength) {
-        const size = view.getUint32(i, false);
-        const name = String.fromCharCode(view.getUint8(i+4),view.getUint8(i+5),view.getUint8(i+6),view.getUint8(i+7));
-        if (name === 'moov') {
-          const moovStart = from + i;
-          const moovBuf = (from + i + size <= to) ? buf.slice(i, i + size) : await readSlice(moovStart, moovStart + size);
+      let localOff = 0;
+      while (localOff + HDR <= buf.byteLength) {
+        let boxSize = view.getUint32(localOff, false);
+        const boxName = String.fromCharCode(
+          view.getUint8(localOff+4), view.getUint8(localOff+5),
+          view.getUint8(localOff+6), view.getUint8(localOff+7)
+        );
+        let headerSize = 8;
+        if (boxSize === 1) {
+          // 64-bit extended size
+          if (localOff + 16 > buf.byteLength) break;
+          const hi = view.getUint32(localOff+8, false);
+          const lo = view.getUint32(localOff+12, false);
+          boxSize = hi * 0x100000000 + lo;
+          headerSize = 16;
+        } else if (boxSize === 0) {
+          // box extends to EOF
+          boxSize = fileSize - (pos + localOff);
+        }
+        if (boxSize < headerSize) break;
+
+        if (boxName === 'moov') {
+          const moovStart = pos + localOff;
+          const moovEnd2  = moovStart + boxSize;
+          if (moovEnd2 > fileSize) throw new Error('moov box 超出檔案大小');
+          onProgress(0.08, '讀取 moov…');
+          // read moov fully (can be 10-30 MB for 120fps iPhone)
+          const moovBuf = await readSlice(moovStart, moovEnd2);
           return { moovStart, moovBuf };
         }
-        if (size < 8 || size > fileSize) break;
-        i += size;
+
+        // Not moov — jump over this box entirely (don't read mdat content)
+        const absBoxEnd = pos + localOff + boxSize;
+        if (absBoxEnd > fileSize || boxSize > fileSize) break;
+
+        // If box end is beyond our chunk, break inner loop and seek to box end
+        if (absBoxEnd > chunkEnd - HDR) {
+          pos = absBoxEnd;
+          localOff = buf.byteLength; // exit inner while
+        } else {
+          localOff += boxSize;
+        }
+      }
+      if (localOff < buf.byteLength) {
+        // inner loop exited early due to a jump — pos already updated
+        if (pos <= chunkEnd) pos = chunkEnd; // shouldn't happen, safety
       }
     }
-    throw new Error('找不到 moov box');
+    throw new Error('找不到 moov box（可能不是標準 MP4/MOV 格式）');
   }
 
   const { moovStart, moovBuf } = await findMoov();
