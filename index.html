@@ -1125,20 +1125,11 @@ function readFileSlice(file, start, end) {
   });
 }
 
-function seekExact(t, timeout = 4000) {
+function seekExact(t) {
   return new Promise(resolve => {
     const clamped = Math.max(0, Math.min(duration - 0.001, t));
     if (Math.abs(video.currentTime - clamped) < 0.0001) { resolve(); return; }
-    let settled = false;
-    const finish = () => {
-      if (settled) return; settled = true;
-      video.removeEventListener('seeked', done);
-      clearTimeout(timer);
-      resolve();
-    };
-    const done = () => finish();
-    // timeout fallback: large files on iPhone may never fire 'seeked'
-    const timer = setTimeout(finish, timeout);
+    const done = () => { video.removeEventListener('seeked', done); resolve(); };
     video.addEventListener('seeked', done);
     video.currentTime = clamped;
   });
@@ -1155,59 +1146,29 @@ async function generateThumbnails() {
     thumbStatus.style.display = 'none'; return;
   }
 
-  // Large file protection: files > 800 MB skip thumbnail generation entirely
-  const fileSizeMB = currentFile ? currentFile.size / (1024 * 1024) : 0;
-  if (fileSizeMB > 800) {
-    thumbStatus.textContent = '檔案過大，略過縮圖';
-    thumbStatus.style.display = 'block';
-    // draw a simple gradient placeholder instead
-    const W2 = thumbnailStrip.offsetWidth || 320;
-    const H2 = thumbnailStrip.offsetHeight || 50;
-    const pc = document.createElement('canvas');
-    pc.width = W2; pc.height = H2;
-    const pg = pc.getContext('2d');
-    const grad = pg.createLinearGradient(0,0,W2,0);
-    grad.addColorStop(0,'#1a1a2e'); grad.addColorStop(0.5,'#2d2d4a'); grad.addColorStop(1,'#1a1a2e');
-    pg.fillStyle = grad; pg.fillRect(0,0,W2,H2);
-    pg.fillStyle = 'rgba(255,255,255,0.15)';
-    pg.font = '12px sans-serif'; pg.textAlign = 'center';
-    pg.fillText('縮圖略過（檔案 > 800 MB）', W2/2, H2/2 + 4);
-    pc.style.cssText = `width:${W2}px;height:${H2}px;flex-shrink:0;`;
-    thumbCanvasStrip.appendChild(pc);
-    setTimeout(() => { thumbStatus.style.display = 'none'; }, 1500);
-    updateUI();
-    return;
-  }
-
   const W = thumbnailStrip.offsetWidth || 320;
   const H = thumbnailStrip.offsetHeight || 50;
   const vw = video.videoWidth || 16;
   const vh = video.videoHeight || 9;
   const aspect = vw / vh;
   const tw = Math.round(H * aspect);
-  // Reduce thumbnail count for files > 200 MB to avoid long seek chains
-  const maxCount = fileSizeMB > 200 ? 6 : Math.max(6, Math.round(W / tw));
-  const count = Math.min(maxCount, Math.max(6, Math.round(W / tw)));
+  const count = Math.max(6, Math.round(W / tw));
 
   for (let i = 0; i < count; i++) {
     try {
-      // Per-seek timeout scales with file size: bigger file = more time per seek
-      const seekTimeout = Math.min(8000, 2000 + fileSizeMB * 2);
-      await seekExact((i / count) * duration, seekTimeout);
+      await seekExact((i / count) * duration);
       const c = document.createElement('canvas');
       c.width = tw; c.height = H;
       c.getContext('2d').drawImage(video, 0, 0, tw, H);
       c.style.cssText = `width:${tw}px;height:${H}px;flex-shrink:0;`;
       thumbCanvasStrip.appendChild(c);
     } catch(e) {
-      // skip this frame
+      // Skip this frame if seek fails
     }
-    // yield to UI thread between each seek
-    await new Promise(r => setTimeout(r, 30));
   }
 
   thumbStatus.style.display = 'none';
-  try { await seekExact(0, 3000); } catch(e) {}
+  try { await seekExact(0); } catch(e) {}
   updateUI();
 }
 
