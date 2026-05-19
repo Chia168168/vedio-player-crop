@@ -2038,121 +2038,27 @@ document.getElementById('loop-export').addEventListener('click', async e => {
   const mimeType = ext === 'mov' ? 'video/quicktime' : 'video/mp4';
   const filename = `${base}_clip_${ss.replace('.','_')}.${ext}`;
 
-  /* ── SW streaming download ──
-     Builds a ReadableStream that reads the source file 4 MB at a time,
-     registers it with the Service Worker, then clicks a link to /~dl/<token>.
-     Safari iOS receives it as a normal file download — peak RAM ≈ 4 MB.     */
-  async function swStreamSave(ftypBox, newMoovBox, mdatHeader, orderedSamples) {
-    // Wait up to 3 seconds for SW controller to become available
-    let sw = navigator.serviceWorker && navigator.serviceWorker.controller;
-    if (!sw && navigator.serviceWorker) {
+  /* readChunk: read a slice of currentFile with retry.
+     Safari iOS FileReader can fail on large or misaligned reads — retry up to 3× */
+  async function readChunk(start, end) {
+    for (let attempt = 0; attempt < 3; attempt++) {
       try {
-        await Promise.race([
-          navigator.serviceWorker.ready.then(() => {
-            sw = navigator.serviceWorker.controller;
-          }),
-          new Promise((_, rej) => setTimeout(() => rej(new Error('SW timeout')), 3000))
-        ]);
-      } catch(_) {}
-      sw = navigator.serviceWorker.controller;
-    }
-    if (!sw) return false; // SW still not ready after waiting
-
-    const READ_CHUNK = 4 * 1024 * 1024;
-    const totalBytes = orderedSamples.reduce((s, r) => s + r.size, 0);
-    const totalSize  = ftypBox.byteLength + newMoovBox.byteLength + mdatHeader.byteLength + totalBytes;
-
-    // Merge consecutive sample regions to reduce FileReader calls
-    const regions = [];
-    for (const { fileStart, size } of orderedSamples) {
-      const last = regions[regions.length - 1];
-      if (last && fileStart <= last.end + 1) {
-        last.end = Math.max(last.end, fileStart + size);
-      } else {
-        regions.push({ start: fileStart, end: fileStart + size });
+        const buf = await new Promise((res, rej) => {
+          const r = new FileReader();
+          r.onload = ev => {
+            const ab = ev.target.result;
+            if (!ab || ab.byteLength === 0) rej(new Error('empty'));
+            else res(ab);
+          };
+          r.onerror = () => rej(new Error('fr'));
+          r.readAsArrayBuffer(currentFile.slice(start, end));
+        });
+        return new Uint8Array(buf);
+      } catch(_) {
+        if (attempt === 2) throw new Error('讀取失敗 @ ' + start);
+        await new Promise(r => setTimeout(r, 150 * (attempt + 1)));
       }
     }
-
-
-    // Set up MessageChannel — SW pulls data via port1, we push via port2
-    const token = Date.now().toString(36) + Math.random().toString(36).slice(2);
-    const { port1, port2 } = new MessageChannel();
-
-    // Register with SW: send port1 so SW can receive chunks
-    sw.postMessage(
-      { type: 'STREAM_REGISTER', token, filename, mime: mimeType, size: totalSize },
-      [port1]
-    );
-
-    // Set onmessage BEFORE clicking — SW may send 'ready' any time after fetch fires
-    const pumpPromise = new Promise((resolve, reject) => {
-      port2.onmessage = async e => {
-        if (e.data !== 'ready') return;
-        // SW is ready — start pumping chunks
-        try {
-          // Send ftyp + moov + mdat-header first (small, fine to transfer)
-          port2.postMessage(ftypBox.buffer.slice(ftypBox.byteOffset, ftypBox.byteOffset + ftypBox.byteLength));
-          port2.postMessage(newMoovBox.buffer.slice(newMoovBox.byteOffset, newMoovBox.byteOffset + newMoovBox.byteLength));
-          port2.postMessage(mdatHeader.buffer.slice(mdatHeader.byteOffset, mdatHeader.byteOffset + mdatHeader.byteLength));
-
-          const READ_CHUNK2 = 4 * 1024 * 1024; // outer loop stride
-          let writtenBytes = 0;
-          for (const region of regions) {
-            let pos = region.start;
-            while (pos < region.end) {
-              if (exportCancelled) { port2.postMessage(null); resolve(false); return; }
-              const sliceEnd = Math.min(pos + READ_CHUNK2, region.end);
-              // Read in 512 KB pieces with retry — avoids iOS FileReader limits
-              const PIECE = 512 * 1024;
-              for (let sub = pos; sub < sliceEnd; sub += PIECE) {
-                if (exportCancelled) { port2.postMessage(null); resolve(false); return; }
-                const subEnd = Math.min(sub + PIECE, sliceEnd);
-                let buf = null;
-                // Retry up to 3 times on FileReader error
-                for (let attempt = 0; attempt < 3; attempt++) {
-                  try {
-                    buf = await new Promise((res, rej) => {
-                      const r = new FileReader();
-                      r.onload = ev => {
-                        const ab = ev.target.result;
-                        if (!ab || ab.byteLength === 0) rej(new Error('empty'));
-                        else res(ab);
-                      };
-                      r.onerror = () => rej(new Error('fr error'));
-                      r.readAsArrayBuffer(currentFile.slice(sub, subEnd));
-                    });
-                    break; // success
-                  } catch(fe) {
-                    if (attempt === 2) throw new Error('讀取失敗 @ ' + sub);
-                    await new Promise(r => setTimeout(r, 200 * (attempt + 1)));
-                  }
-                }
-                port2.postMessage(buf, [buf]);
-              }
-              writtenBytes += sliceEnd - pos;
-              pos = sliceEnd;
-              exportProgressF.style.width = Math.round(68 + 30 * writtenBytes / totalBytes) + '%';
-              exportStatus.textContent = `寫入 ${Math.round(100 * writtenBytes / totalBytes)}%…`;
-              await new Promise(r => setTimeout(r, 0)); // yield UI
-            }
-          }
-          port2.postMessage(null); // signal end-of-stream
-          resolve(true);
-        } catch(err) {
-          port2.postMessage(null);
-          reject(err);
-        }
-      };
-    });
-
-    // Now click — this triggers SW fetch which sets up ReadableStream and sends 'ready'
-    const params = new URLSearchParams({ filename, mime: mimeType });
-    const dlUrl = `/~dl/${token}?${params}`;
-    const a = document.createElement('a');
-    a.href = dlUrl; a.download = filename;
-    document.body.appendChild(a); a.click(); document.body.removeChild(a);
-
-    return await pumpPromise;
   }
 
   try {
@@ -2164,33 +2070,53 @@ document.getElementById('loop-export').addEventListener('click', async e => {
       });
       if (exportCancelled) { exportOverlay.classList.remove('show'); return; }
 
-      exportProgressF.style.width = '68%';
-      exportStatus.textContent = '寫入影片…';
-
       const { ftypBox, newMoovBox, mdatHeader, orderedSamples } = result;
 
-      const usedSW = await swStreamSave(ftypBox, newMoovBox, mdatHeader, orderedSamples);
-      if (!usedSW) {
-        // SW not ready fallback: build Blob normally (may OOM on very large clips)
-        exportStatus.textContent = '組合中…';
-        showToast('SW 未就緒，改用一般下載');
-        const parts = [ftypBox, newMoovBox, mdatHeader];
-        for (const { fileStart, size } of orderedSamples) {
-          const chunk = await new Promise((res, rej) => {
-            const r = new FileReader();
-            r.onload = ev => res(new Uint8Array(ev.target.result));
-            r.onerror = () => rej(new Error('讀取失敗 @ ' + fileStart));
-            r.readAsArrayBuffer(currentFile.slice(fileStart, fileStart + size));
-          });
-          parts.push(chunk);
-        }
-        const blob = new Blob(parts, { type: mimeType });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url; a.download = filename;
-        document.body.appendChild(a); a.click(); document.body.removeChild(a);
-        setTimeout(() => URL.revokeObjectURL(url), 15000);
+      // Merge consecutive sample regions to minimise FileReader calls
+      const regions = [];
+      for (const { fileStart, size } of orderedSamples) {
+        const last = regions[regions.length - 1];
+        if (last && fileStart <= last.end + 1)
+          last.end = Math.max(last.end, fileStart + size);
+        else
+          regions.push({ start: fileStart, end: fileStart + size });
       }
+
+      // Read sample data in 512 KB pieces, push into parts[]
+      // Safari Blob([...Uint8Arrays]) stores references — no extra copy until download
+      const PIECE = 512 * 1024;
+      const totalBytes = orderedSamples.reduce((s, r) => s + r.size, 0);
+      const parts = [ftypBox, newMoovBox, mdatHeader];
+      let readBytes = 0;
+
+      exportProgressF.style.width = '68%';
+      exportStatus.textContent = '讀取資料…';
+
+      for (const region of regions) {
+        let pos = region.start;
+        while (pos < region.end) {
+          if (exportCancelled) { exportOverlay.classList.remove('show'); return; }
+          const chunkEnd = Math.min(pos + PIECE, region.end);
+          const chunk = await readChunk(pos, chunkEnd);
+          parts.push(chunk);
+          readBytes += chunkEnd - pos;
+          pos = chunkEnd;
+          exportProgressF.style.width = Math.round(68 + 28 * readBytes / totalBytes) + '%';
+          exportStatus.textContent = `讀取 ${Math.round(100 * readBytes / totalBytes)}%…`;
+          await new Promise(r => setTimeout(r, 0)); // yield UI
+        }
+      }
+
+      exportProgressF.style.width = '98%';
+      exportStatus.textContent = '下載中…';
+
+      // Build Blob from parts — Safari stores refs, not copies
+      const blob = new Blob(parts, { type: mimeType });
+      const url  = URL.createObjectURL(blob);
+      const a    = document.createElement('a');
+      a.href = url; a.download = filename;
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 30000);
 
       exportProgressF.style.width = '100%';
       exportStatus.textContent = '完成！';
@@ -2206,10 +2132,10 @@ document.getElementById('loop-export').addEventListener('click', async e => {
       });
       if (exportCancelled) { exportOverlay.classList.remove('show'); return; }
       const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
+      const a   = document.createElement('a');
       a.href = url; a.download = `${base}_clip_${ss.replace('.','_')}.${outExt}`;
       document.body.appendChild(a); a.click(); document.body.removeChild(a);
-      setTimeout(() => URL.revokeObjectURL(url), 8000);
+      setTimeout(() => URL.revokeObjectURL(url), 30000);
       exportProgressF.style.width = '100%';
       exportStatus.textContent = '完成！';
       setTimeout(() => exportOverlay.classList.remove('show'), 1400);
