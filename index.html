@@ -1536,39 +1536,47 @@ async function trimMp4(file, startSec, endSec, onProgress) {
   /* ── locate moov by scanning top-level boxes ── */
   onProgress(0.05, '掃描 moov…');
   async function findMoov() {
-    const HDR=8; let pos=0;
-    while(pos+HDR<=fileSize){
-      if(exportCancelled) throw new Error('cancelled');
-      const chunkEnd=Math.min(pos+4*1024*1024,fileSize);
-      const buf=await readSlice(pos,chunkEnd);
-      const view=new DataView(buf);
-      let localOff=0;
-      while(localOff+HDR<=buf.byteLength){
-        let boxSize=view.getUint32(localOff,false);
-        const boxName=String.fromCharCode(view.getUint8(localOff+4),view.getUint8(localOff+5),view.getUint8(localOff+6),view.getUint8(localOff+7));
-        let hs=8;
-        if(boxSize===1){
-          if(localOff+16>buf.byteLength)break;
-          boxSize=view.getUint32(localOff+8,false)*0x100000000+view.getUint32(localOff+12,false);
-          hs=16;
-        } else if(boxSize===0){
-          boxSize=fileSize-(pos+localOff);
-        }
-        if(boxSize<hs)break;
-        if(boxName==='moov'){
-          const moovStart=pos+localOff;
-          const moovEnd2=moovStart+boxSize;
-          if(moovEnd2>fileSize) throw new Error('moov 超出檔案大小');
-          onProgress(0.08,'讀取 moov…');
-          const moovBuf=await readSlice(moovStart,moovEnd2);
-          return {moovStart,moovBuf};
-        }
-        const absBoxEnd=pos+localOff+boxSize;
-        if(absBoxEnd>fileSize||boxSize>fileSize)break;
-        if(absBoxEnd>chunkEnd-HDR){pos=absBoxEnd;localOff=buf.byteLength;}
-        else localOff+=boxSize;
+    /* Read only 16 bytes at a time to get box header, then jump by boxSize.
+       Never reads mdat content. Handles files of any size safely.       */
+    let pos = 0;
+    while (pos < fileSize) {
+      if (exportCancelled) throw new Error('cancelled');
+      if (pos < 0 || pos >= fileSize) break; // safety guard
+      const hdrSize = Math.min(16, fileSize - pos); // enough for size+name+ext64
+      const hdrBuf  = await readSlice(pos, pos + hdrSize);
+      const hdrView = new DataView(hdrBuf);
+      if (hdrBuf.byteLength < 8) break;
+
+      let boxSize = hdrView.getUint32(0, false);
+      const boxName = String.fromCharCode(
+        hdrView.getUint8(4), hdrView.getUint8(5),
+        hdrView.getUint8(6), hdrView.getUint8(7)
+      );
+
+      if (boxSize === 1) {
+        // 64-bit extended size
+        if (hdrBuf.byteLength < 16) break;
+        const hi = hdrView.getUint32(8,  false);
+        const lo = hdrView.getUint32(12, false);
+        boxSize = hi * 0x100000000 + lo;
+      } else if (boxSize === 0) {
+        // box runs to EOF
+        boxSize = fileSize - pos;
       }
-      if(pos<=chunkEnd) pos=chunkEnd;
+
+      // Sanity checks
+      if (boxSize < 8 || boxSize > fileSize) break;
+
+      if (boxName === 'moov') {
+        const moovEnd2 = pos + boxSize;
+        if (moovEnd2 > fileSize) throw new Error('moov 超出檔案大小');
+        onProgress(0.08, '讀取 moov…');
+        const moovBuf = await readSlice(pos, moovEnd2);
+        return { moovStart: pos, moovBuf };
+      }
+
+      // Skip this box entirely — jump to next
+      pos += boxSize;
     }
     throw new Error('找不到 moov box（可能不是標準 MP4/MOV 格式）');
   }
