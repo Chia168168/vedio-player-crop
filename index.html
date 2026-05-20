@@ -1673,8 +1673,30 @@ async function trimMp4(file, startSec, endSec, onProgress) {
       for(let j=0;j<sc.samplesPerChunk&&si<sampleCount;j++,si++){sampleOffsets[si]=off;off+=sizes[si];}
     }
 
+    /* parse elst entries for later rebuild */
+    const elstEntries = []; // [{segDur, mediaTime}] in movie timescale / track timescale
+    const edtsB2 = findBox(moovView, o+8, trakEnd, 'edts');
+    if (edtsB2) {
+      const elstB2 = findBox(moovView, edtsB2.off+8, edtsB2.off+edtsB2.size, 'elst');
+      if (elstB2) {
+        const ev2 = elstB2.off + elstB2.hs;
+        const ver2 = moovView.getUint8(ev2);
+        const cnt2 = ru32(moovView, ev2+4);
+        for (let ei=0; ei<cnt2; ei++) {
+          let segDur, mediaTime;
+          if (ver2===1) {
+            segDur    = Number(ru64(moovView, ev2+8 + ei*20));
+            mediaTime = Number(ru64(moovView, ev2+8 + ei*20 + 8));
+          } else {
+            segDur    = ru32(moovView, ev2+8 + ei*12);
+            mediaTime = ru32(moovView, ev2+8 + ei*12 + 4);
+          }
+          elstEntries.push({ segDur, mediaTime });
+        }
+      }
+    }
     tracks.push({tScale,sttsList,sampleTimes,sampleCts,sampleOffsets,sizes,keyframes,
-                 trakOff:o,trakSize:size,ctsList});
+                 trakOff:o,trakSize:size,ctsList,elstEntries});
   });
   if(tracks.length===0) throw new Error('找不到 track 資料');
 
@@ -1700,34 +1722,6 @@ async function trimMp4(file, startSec, endSec, onProgress) {
   /* ── collect sample ranges per track ── */
   onProgress(0.28,'計算範圍…');
   const rangesNeeded=[];
-  /* dump raw elst for all tracks */
-  let elstDump = '';
-  tracks.forEach((tr,ti)=>{
-    const tEnd = tr.trakOff + tr.trakSize;
-    const edtsB = findBox(moovView, tr.trakOff+8, tEnd, 'edts');
-    if (!edtsB) { elstDump += ` T${ti}:no-edts`; return; }
-    const elstB = findBox(moovView, edtsB.off+8, edtsB.off+edtsB.size, 'elst');
-    if (!elstB) { elstDump += ` T${ti}:no-elst`; return; }
-    const ev = elstB.off + elstB.hs;
-    const ver = moovView.getUint8(ev);
-    const cnt = ru32(moovView, ev+4);
-    elstDump += ` T${ti}(v${ver},n${cnt}):`;
-    for (let ei=0; ei<Math.min(cnt,3); ei++) {
-      let segDur, mediaTm;
-      if (ver===1) {
-        segDur  = Number(ru64(moovView, ev+8 + ei*20));
-        mediaTm = Number(ru64(moovView, ev+8 + ei*20 + 8));
-      } else {
-        segDur  = ru32(moovView, ev+8 + ei*12);
-        mediaTm = ru32(moovView, ev+8 + ei*12 + 4);
-      }
-      elstDump += `[seg=${(segDur/tr.tScale).toFixed(3)}s,mt=${mediaTm===0xFFFFFFFF?'-1':((mediaTm/tr.tScale).toFixed(3)+'s')}]`;
-    }
-  });
-  exportStatus.textContent = 'ELST:' + elstDump;
-  await new Promise(r=>setTimeout(r, 15000));
-
-  let dbgStr = `actualStart=${actualStart.toFixed(4)}s actualEnd=${actualEnd.toFixed(4)}s`;
   for(const track of tracks){
     const tS=Math.round(actualStart*track.tScale);
     const tE=Math.round(actualEnd*track.tScale);
@@ -1743,35 +1737,11 @@ async function trimMp4(file, startSec, endSec, onProgress) {
     }
     if(last===-1||last<first) last=first;
     track._first=first; track._last=last;
-    const ti = tracks.indexOf(track);
-    dbgStr += ` | T${ti}: first_t=${(track.sampleTimes[first]/track.tScale).toFixed(4)}s last_t=${(track.sampleTimes[last]/track.tScale).toFixed(4)}s kf=${!!track.keyframes}`;
     for(let i=first;i<=last;i++)
       rangesNeeded.push({start:track.sampleOffsets[i],end:track.sampleOffsets[i]+track.sizes[i]});
   }
-  // Add newDeltas[0] per track to debug
-  tracks.forEach((tr,ti)=>{
-    if(tr._first===undefined) return;
-    const d0 = tr._first+1 < tr.sampleTimes.length
-      ? tr.sampleTimes[tr._first+1]-tr.sampleTimes[tr._first]
-      : (tr.sttsList[0]?.delta||0);
-    dbgStr += ` d0T${ti}=${(d0/tr.tScale*1000).toFixed(1)}ms`;
-  });
-  exportStatus.textContent = dbgStr;
-  await new Promise(r=>setTimeout(r, 12000));
-  await new Promise(r=>setTimeout(r,10000)); // freeze to read debug
+  
 
-  /* debug: show track info in visible overlay */
-  {
-    const lines = tracks.map((tr,ti)=>{
-      const dur=(tr._last!==undefined&&tr._first!==undefined)
-        ?(tr.sampleTimes[tr._last]-tr.sampleTimes[tr._first])/tr.tScale:0;
-      return `T${ti}: scale=${tr.tScale} n=${tr.sampleTimes.length} `+
-             `first=${tr._first} last=${tr._last} `+
-             `dur=${dur.toFixed(2)}s kf=${!!tr.keyframes}`;
-    });
-    exportStatus.textContent = lines.join(' | ');
-    await new Promise(r => setTimeout(r, 3000));
-  }
 
   rangesNeeded.sort((a,b)=>a.start-b.start);
   const merged=[];
@@ -1863,6 +1833,20 @@ async function trimMp4(file, startSec, endSec, onProgress) {
     const p=new Uint8Array(20);
     wu32(p,0,0);wu32(p,4,1);wu32(p,8,1);wu32(p,12,1);wu32(p,16,1);
     return writeBox('stsc',p);
+  }
+  function buildElst(entries, movieTScale) {
+    // entries: [{segDurSec, mediaTimeTicks (-1=empty or ticks in track tScale), mediaRate=1}]
+    // version 0, all durations in movie timescale, mediaTime in track timescale
+    const n = entries.length;
+    const p = new Uint8Array(8 + n * 12); // ver+flags(4) + count(4) + n*12
+    wu32(p, 0, 0); // version=0, flags=0
+    wu32(p, 4, n);
+    for (let i=0; i<n; i++) {
+      wu32(p, 8 + i*12,     entries[i].segDur);    // segment_duration (movie tScale ticks)
+      wu32(p, 8 + i*12 + 4, entries[i].mediaTime); // media_time (0xFFFFFFFF = empty)
+      wu32(p, 8 + i*12 + 8, 0x00010000);           // media_rate = 1.0
+    }
+    return writeBox('edts', writeBox('elst', p));
   }
   function buildStco(offs){
     const p=new Uint8Array(8+offs.length*4);
@@ -1973,14 +1957,40 @@ async function trimMp4(file, startSec, endSec, onProgress) {
     wu32(tkhdBuf,tkhdV===1?8+28:8+20,Math.round(clipDur*movieTimescale));
     wu32(tkhdBuf,0,tkhdBuf.byteLength);
 
-    /* ── trak: tkhd + skip edts/elst (remove edit list) + new mdia ── */
+    /* ── trak: tkhd + rebuilt edts (preserves encoder delay) + new mdia ── */
     const trakKids=[];
     iterBoxes(moovView,track.trakOff+8,trakEnd,(name,o,size)=>{
-      // REMOVE edts (edit list) — it would offset timing relative to the new start
       if(!['tkhd','mdia','edts'].includes(name))
         trakKids.push(new Uint8Array(moovBuf.slice(o,o+size)));
     });
-    newTrakBoxes.push(writeBox('trak',concatU8(tkhdBuf,...trakKids,newMdiaBox)));
+    // Rebuild elst: preserve structure but update segment durations to clip length
+    let newEdtsBox = null;
+    if (track.elstEntries.length > 0) {
+      const clipMovieTicks = Math.round(clipDur * movieTimescale);
+      const newEntries = [];
+      if (track.elstEntries.length === 1) {
+        // Single entry: just update segDur, keep mediaTime
+        newEntries.push({ segDur: clipMovieTicks, mediaTime: track.elstEntries[0].mediaTime });
+      } else {
+        // Multi-entry (e.g. empty edit + real audio):
+        // Keep all empty edits (mediaTime=0xFFFFFFFF) with original segDur,
+        // set the last real entry's segDur to remaining clip duration
+        let remaining = clipMovieTicks;
+        for (let ei=0; ei<track.elstEntries.length; ei++) {
+          const e = track.elstEntries[ei];
+          const isEmpty = (e.mediaTime === 0xFFFFFFFF);
+          if (isEmpty) {
+            newEntries.push({ segDur: e.segDur, mediaTime: 0xFFFFFFFF });
+            remaining -= e.segDur;
+          } else {
+            // last real entry — use remaining duration, keep original mediaTime
+            newEntries.push({ segDur: Math.max(remaining, 1), mediaTime: e.mediaTime });
+          }
+        }
+      }
+      newEdtsBox = buildElst(newEntries, movieTimescale);
+    }
+    newTrakBoxes.push(writeBox('trak',concatU8(tkhdBuf,...trakKids,...(newEdtsBox?[newEdtsBox]:[]),newMdiaBox)));
   }
 
   /* ── mvhd: patch duration ── */
