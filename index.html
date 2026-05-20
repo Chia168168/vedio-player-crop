@@ -1554,7 +1554,7 @@ function buildStco(offs){
     return writeBox('stco',p);
   }
 
-function readChunk(start, end) {
+async function readChunk(start, end) {
     for (let attempt = 0; attempt < 3; attempt++) {
       try {
         const buf = await new Promise((res, rej) => {
