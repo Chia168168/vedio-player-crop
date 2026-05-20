@@ -474,8 +474,8 @@ if ('serviceWorker' in navigator) {
 <!-- Upload -->
 <div id="upload-screen">
   <div class="logo">Video Frame Player</div>
-  <div class="upload-zone">
-    <input type="file" id="file-input" accept="video/*">
+  <div class="upload-zone" id="upload-zone">
+    <input type="file" id="file-input" accept="video/*" style="position:fixed;left:-9999px;top:-9999px;opacity:0;pointer-events:none;">
     <div class="upload-icon">
       <svg viewBox="0 0 24 24" fill="none" stroke-width="1.8">
         <path d="M15 10l4.553-2.276A1 1 0 0121 8.723v6.554a1 1 0 01-1.447.894L15 14M3 8a2 2 0 012-2h10a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V8z"/>
@@ -836,7 +836,15 @@ changeInput.accept = 'video/*';
 changeInput.style.display = 'none';
 document.body.appendChild(changeInput);
 
+document.getElementById('upload-zone').addEventListener('click', e => {
+  e.preventDefault();
+  e.stopPropagation();
+  fileInput.click();
+});
+
 fileInput.addEventListener('change', e => {
+  e.preventDefault();
+  e.stopPropagation();
   const f = e.target.files && e.target.files[0];
   if (!f) return;
   fileInput.value = '';
@@ -853,6 +861,9 @@ document.getElementById('change-video-btn').addEventListener('click', e => {
 });
 
 function loadVideoFile(file) {
+  if (!file) return;
+  try { fileInput.value = ''; } catch (_) {}
+
   stopFrameMode();
   video.pause();
   isPlaying = false; setPlayIcon(false);
@@ -1509,7 +1520,7 @@ let exportCancelled = false;
 
 
 
-/* ── box-builder helpers (top-level for Safari scope) ── */
+/* top-level helpers hoisted for Safari */
 
 function buildStts(deltas){
     /* deltas = array of per-sample delta values (numbers) */
@@ -1587,27 +1598,6 @@ function buildStco(offs){
     wu32(p,0,0);wu32(p,4,offs.length);
     for(let i=0;i<offs.length;i++)wu32(p,8+i*4,offs[i]);
     return writeBox('stco',p);
-  }
-
-function readChunk(start, end) {
-    for (let attempt = 0; attempt < 3; attempt++) {
-      try {
-        const buf = await new Promise((res, rej) => {
-          const r = new FileReader();
-          r.onload = ev => {
-            const ab = ev.target.result;
-            if (!ab || ab.byteLength === 0) rej(new Error('empty'));
-            else res(ab);
-          };
-          r.onerror = () => rej(new Error('fr'));
-          r.readAsArrayBuffer(currentFile.slice(start, end));
-        });
-        return new Uint8Array(buf);
-      } catch(_) {
-        if (attempt === 2) throw new Error('讀取失敗 @ ' + start);
-        await new Promise(r => setTimeout(r, 150 * (attempt + 1)));
-      }
-    }
   }
 
 function buildSegmentHeaders(tracks, segSamples, movieTimescale, ftypBox, moovBuf) {
@@ -1796,6 +1786,27 @@ function buildSegmentHeaders(tracks, segSamples, movieTimescale, ftypBox, moovBu
 
   return { segMoovBox, segMdatHdr };
 }
+
+function readChunk(start, end) {
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        const buf = await new Promise((res, rej) => {
+          const r = new FileReader();
+          r.onload = ev => {
+            const ab = ev.target.result;
+            if (!ab || ab.byteLength === 0) rej(new Error('empty'));
+            else res(ab);
+          };
+          r.onerror = () => rej(new Error('fr'));
+          r.readAsArrayBuffer(currentFile.slice(start, end));
+        });
+        return new Uint8Array(buf);
+      } catch(_) {
+        if (attempt === 2) throw new Error('讀取失敗 @ ' + start);
+        await new Promise(r => setTimeout(r, 150 * (attempt + 1)));
+      }
+    }
+  }
 
 async function trimMp4(file, startSec, endSec, onProgress) {
   const fileSize = file.size;
@@ -2564,6 +2575,17 @@ document.getElementById('loop-convert').addEventListener('click', async e => {
   }
 });
 
+
+
+/* upload-zone-pointerup-fix */
+const _uploadZone = document.getElementById('upload-zone');
+if (_uploadZone) {
+  _uploadZone.addEventListener('pointerup', e => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!e.target.closest('#file-input')) fileInput.click();
+  }, { passive: false });
+}
 </script>
 </body>
 </html>
