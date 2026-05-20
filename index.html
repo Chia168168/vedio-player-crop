@@ -1700,6 +1700,33 @@ async function trimMp4(file, startSec, endSec, onProgress) {
   /* ── collect sample ranges per track ── */
   onProgress(0.28,'計算範圍…');
   const rangesNeeded=[];
+  /* dump raw elst for all tracks */
+  let elstDump = '';
+  tracks.forEach((tr,ti)=>{
+    const tEnd = tr.trakOff + tr.trakSize;
+    const edtsB = findBox(moovView, tr.trakOff+8, tEnd, 'edts');
+    if (!edtsB) { elstDump += ` T${ti}:no-edts`; return; }
+    const elstB = findBox(moovView, edtsB.off+8, edtsB.off+edtsB.size, 'elst');
+    if (!elstB) { elstDump += ` T${ti}:no-elst`; return; }
+    const ev = elstB.off + elstB.hs;
+    const ver = moovView.getUint8(ev);
+    const cnt = ru32(moovView, ev+4);
+    elstDump += ` T${ti}(v${ver},n${cnt}):`;
+    for (let ei=0; ei<Math.min(cnt,3); ei++) {
+      let segDur, mediaTm;
+      if (ver===1) {
+        segDur  = Number(ru64(moovView, ev+8 + ei*20));
+        mediaTm = Number(ru64(moovView, ev+8 + ei*20 + 8));
+      } else {
+        segDur  = ru32(moovView, ev+8 + ei*12);
+        mediaTm = ru32(moovView, ev+8 + ei*12 + 4);
+      }
+      elstDump += `[seg=${(segDur/tr.tScale).toFixed(3)}s,mt=${mediaTm===0xFFFFFFFF?'-1':((mediaTm/tr.tScale).toFixed(3)+'s')}]`;
+    }
+  });
+  exportStatus.textContent = 'ELST:' + elstDump;
+  await new Promise(r=>setTimeout(r, 15000));
+
   let dbgStr = `actualStart=${actualStart.toFixed(4)}s actualEnd=${actualEnd.toFixed(4)}s`;
   for(const track of tracks){
     const tS=Math.round(actualStart*track.tScale);
