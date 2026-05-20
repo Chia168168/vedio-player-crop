@@ -8,6 +8,7 @@
 <meta name="apple-mobile-web-app-title" content="Frame Player">
 <meta name="theme-color" content="#0a0a0c">
 <title>影片播放器</title>
+<script src="https://unpkg.com/@ffmpeg/ffmpeg@0.11.6/dist/ffmpeg.min.js"></script>
 <style>
   @import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@300;400;500&family=Space+Grotesk:wght@300;400;600&display=swap');
 
@@ -460,8 +461,6 @@
   }
   #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
 </style>
-
-
 </head>
 <body>
 
@@ -1454,862 +1453,21 @@ document.addEventListener('visibilitychange', () => {
   }
 });
 
-// ── Export clip (No FFmpeg — pure JS MP4 box trim + MediaRecorder fallback) ──
+// ── Export clip (FFmpeg.wasm) ──
 const exportOverlay   = document.getElementById('export-overlay');
 const exportStatus    = document.getElementById('export-status');
 const exportProgressF = document.getElementById('export-progress-fill');
 const exportCancelBtn = document.getElementById('export-cancel');
+let ffmpegInstance = null;
+let ffmpegLoaded = false;
 let exportCancelled = false;
-
-/* ═══════════════════════════════════════════════
-   trimMp4(): pure-JS keyframe-aware stream-copy
-   v3 — fixes ctts, stts last-delta, stss re-index,
-        elst removal, stsd passthrough.
-   No WASM. Supports any file size.
-   ═══════════════════════════════════════════════ */
-  function findBox(view, start, end, target) {
-    let found=null;
-    iterBoxes(view,start,end,(name,o,size,hs)=>{if(name===target)found={off:o,size,hs};});
-    return found;
-  }  
-    function ru32(v, o) { return v.getUint32(o, false); }
-  function ri32(v, o) { return v.getInt32(o, false); }
-  function ru64(v, o) { return ru32(v,o) * 0x100000000 + ru32(v,o+4); }
-  function r4cc(v, o) { let s=''; for(let i=0;i<4;i++) s+=String.fromCharCode(v.getUint8(o+i)); return s; }
-  function wu32(a, o, v) { a[o]=(v>>>24)&0xff; a[o+1]=(v>>>16)&0xff; a[o+2]=(v>>>8)&0xff; a[o+3]=v&0xff; }
-  function writeBox(name, payload) {
-    const sz = 8 + payload.byteLength;
-    const out = new Uint8Array(sz);
-    wu32(out,0,sz);
-    for(let i=0;i<4;i++) out[4+i]=name.charCodeAt(i);
-    out.set(payload,8);
-    return out;
-  }
-  function concatU8(...arrays) {
-    const total = arrays.reduce((s,a)=>s+a.byteLength,0);
-    const out = new Uint8Array(total); let off=0;
-    for(const a of arrays){out.set(a,off);off+=a.byteLength;}
-    return out;
-  }
-  function iterBoxes(view, start, end, cb) {
-    let o=start;
-    while(o+8<=end){
-      let size=ru32(view,o); const name=r4cc(view,o+4); let hs=8;
-      if(size===1){if(o+16>end)break;size=Number(ru64(view,o+8));hs=16;}
-      if(size<hs||o+size>end+1)break;
-      cb(name,o,size,hs); o+=size;
-    }
-  }
-
-
-/* helpers hoisted for Safari scope */
-
-function buildStts(deltas){
-    /* deltas = array of per-sample delta values (numbers) */
-    const runs=[];
-    for(let i=0;i<deltas.length;){
-      const d=deltas[i]; let c=1;
-      while(i+c<deltas.length&&deltas[i+c]===d)c++;
-      runs.push({count:c,delta:d}); i+=c;
-    }
-    const p=new Uint8Array(8+runs.length*8);
-    wu32(p,0,0);wu32(p,4,runs.length);
-    for(let i=0;i<runs.length;i++){wu32(p,8+i*8,runs[i].count);wu32(p,12+i*8,runs[i].delta);}
-    return writeBox('stts',p);
-  }
-
-function buildCtts(ctsArr){
-    /* ctsArr = array of per-sample CTS offset values (signed int32) */
-    const runs=[];
-    for(let i=0;i<ctsArr.length;){
-      const d=ctsArr[i]; let c=1;
-      while(i+c<ctsArr.length&&ctsArr[i+c]===d)c++;
-      runs.push({count:c,offset:d}); i+=c;
-    }
-    /* version=1 for signed offsets (required for negative CTS on newer iPhone) */
-    const p=new Uint8Array(8+runs.length*8);
-    p[0]=1; // version=1
-    wu32(p,4,runs.length);
-    const pv=new DataView(p.buffer);
-    for(let i=0;i<runs.length;i++){
-      wu32(p,8+i*8,runs[i].count);
-      pv.setInt32(12+i*8,runs[i].offset,false);
-    }
-    return writeBox('ctts',p);
-  }
-
-function buildStss(kfs){
-    /* kfs = 0-based indices of keyframes in the NEW sample list */
-    const p=new Uint8Array(8+kfs.length*4);
-    wu32(p,0,0);wu32(p,4,kfs.length);
-    for(let i=0;i<kfs.length;i++)wu32(p,8+i*4,kfs[i]+1);
-    return writeBox('stss',p);
-  }
-
-function buildStsz(sza){
-    const p=new Uint8Array(12+sza.length*4);
-    wu32(p,0,0);wu32(p,4,0);wu32(p,8,sza.length);
-    for(let i=0;i<sza.length;i++)wu32(p,12+i*4,sza[i]);
-    return writeBox('stsz',p);
-  }
-
-function buildStsc(){
-    /* one sample per chunk (simplest valid layout) */
-    const p=new Uint8Array(20);
-    wu32(p,0,0);wu32(p,4,1);wu32(p,8,1);wu32(p,12,1);wu32(p,16,1);
-    return writeBox('stsc',p);
-  }
-
-function buildElst(entries, movieTScale) {
-    // entries: [{segDurSec, mediaTimeTicks (-1=empty or ticks in track tScale), mediaRate=1}]
-    // version 0, all durations in movie timescale, mediaTime in track timescale
-    const n = entries.length;
-    const p = new Uint8Array(8 + n * 12); // ver+flags(4) + count(4) + n*12
-    wu32(p, 0, 0); // version=0, flags=0
-    wu32(p, 4, n);
-    for (let i=0; i<n; i++) {
-      wu32(p, 8 + i*12,     entries[i].segDur);    // segment_duration (movie tScale ticks)
-      wu32(p, 8 + i*12 + 4, entries[i].mediaTime); // media_time (0xFFFFFFFF = empty)
-      wu32(p, 8 + i*12 + 8, 0x00010000);           // media_rate = 1.0
-    }
-    return writeBox('edts', writeBox('elst', p));
-  }
-
-function buildStco(offs){
-    const p=new Uint8Array(8+offs.length*4);
-    wu32(p,0,0);wu32(p,4,offs.length);
-    for(let i=0;i<offs.length;i++)wu32(p,8+i*4,offs[i]);
-    return writeBox('stco',p);
-  }
-
-function buildSegmentHeaders(tracks, segSamples, movieTimescale, ftypBox, moovBuf) {
-  const moovView = new DataView(moovBuf);
-  const moovEnd  = moovBuf.byteLength;
-
-  // Per-track: collect this segment's samples in output order
-  const trackSamples = {};
-  for (const s of segSamples) {
-    if (!trackSamples[s.ti]) trackSamples[s.ti] = [];
-    trackSamples[s.ti].push(s);
-  }
-
-  // Rebuild stco offsets (relative to segment mdat start)
-  const newChunkOffsets = {};
-  let mdatOff = 0;
-  for (const s of segSamples) {
-    if (!newChunkOffsets[s.ti]) newChunkOffsets[s.ti] = [];
-    newChunkOffsets[s.ti].push(mdatOff);
-    mdatOff += s.size;
-  }
-  const segPayloadSize = mdatOff;
-
-  const newTrakBoxes = [];
-  for (const track of tracks) {
-    const ti = tracks.indexOf(track);
-    const tSamples = trackSamples[ti];
-    if (!tSamples || tSamples.length === 0) continue;
-
-    // Duration of this segment for this track
-    const lastDelta = tSamples.length > 1
-      ? Math.round((tSamples[tSamples.length-1].dts - tSamples[tSamples.length-2].dts) * track.tScale)
-      : (track.sttsList[0]?.delta || 1);
-    const clipDurSeg = tSamples[tSamples.length-1].dts - tSamples[0].dts
-                     + lastDelta / track.tScale;
-
-    const trakEnd = track.trakOff + track.trakSize;
-    const mdia    = findBox(moovView, track.trakOff+8, trakEnd, 'mdia');
-    const mdiaEnd = mdia.off + mdia.size;
-    const minf    = findBox(moovView, mdia.off+8, mdiaEnd, 'minf');
-    const stbl    = findBox(moovView, minf.off+8, minf.off+minf.size, 'stbl');
-    const stblEnd = stbl.off + stbl.size;
-    const tkhd    = findBox(moovView, track.trakOff+8, trakEnd, 'tkhd');
-    const mdhd    = findBox(moovView, mdia.off+8, mdiaEnd, 'mdhd');
-    const hdlr    = findBox(moovView, mdia.off+8, mdiaEnd, 'hdlr');
-
-    // stts deltas
-    const newDeltas = tSamples.map((s, i) => {
-      const next = tSamples[i+1];
-      const d = next
-        ? Math.round((next.dts - s.dts) * track.tScale)
-        : lastDelta;
-      return Math.max(1, d);
-    });
-
-    // Find full-track index of first sample in this segment
-    const tSfirst = Math.round(tSamples[0].dts * track.tScale);
-    let fullFirst = 0;
-    for (let i = 0; i < track.sampleTimes.length; i++) {
-      if (track.sampleTimes[i] >= tSfirst) { fullFirst = i; break; }
-    }
-
-    // ctts
-    let newCttsBox = null;
-    if (track.ctsList) {
-      const newCts = tSamples.map((_, i) => track.sampleCts[fullFirst + i] || 0);
-      if (newCts.some(v => v !== 0)) newCttsBox = buildCtts(newCts);
-    }
-
-    // stss keyframes
-    let newStss = null;
-    if (track.keyframes) {
-      const kfSet = new Set(track.keyframes);
-      const nkf = tSamples.map((_, i) => kfSet.has(fullFirst + i) ? i : -1).filter(i => i >= 0);
-      if (nkf.length === 0) nkf.push(0);
-      newStss = buildStss(nkf);
-    }
-
-    // stbl
-    const stblKids = [];
-    iterBoxes(moovView, stbl.off+8, stblEnd, (name, o, size) => {
-      if (name === 'stsd') stblKids.push(new Uint8Array(moovBuf.slice(o, o+size)));
-    });
-    const newStblBox = writeBox('stbl', concatU8(
-      ...stblKids,
-      buildStts(newDeltas),
-      ...(newCttsBox ? [newCttsBox] : []),
-      ...(newStss    ? [newStss]    : []),
-      buildStsz(tSamples.map(s => s.size)),
-      buildStsc(),
-      buildStco(newChunkOffsets[ti])
-    ));
-
-    // minf
-    const minfKids = [];
-    iterBoxes(moovView, minf.off+8, minf.off+minf.size, (name, o, size) => {
-      if (name !== 'stbl') minfKids.push(new Uint8Array(moovBuf.slice(o, o+size)));
-    });
-    const newMinfBox = writeBox('minf', concatU8(...minfKids, newStblBox));
-
-    // mdhd — patch duration
-    const mdhdBuf = new Uint8Array(moovBuf.slice(mdhd.off, mdhd.off+mdhd.size));
-    const mdhdV = mdhdBuf[8];
-    wu32(mdhdBuf, mdhdV === 1 ? 28 : 24, Math.round(clipDurSeg * track.tScale));
-    wu32(mdhdBuf, 0, mdhdBuf.byteLength);
-
-    const hdlrBox = new Uint8Array(moovBuf.slice(hdlr.off, hdlr.off+hdlr.size));
-    const mdiaKids = [];
-    iterBoxes(moovView, mdia.off+8, mdiaEnd, (name, o, size) => {
-      if (!['mdhd','hdlr','minf'].includes(name))
-        mdiaKids.push(new Uint8Array(moovBuf.slice(o, o+size)));
-    });
-    const newMdiaBox = writeBox('mdia', concatU8(mdhdBuf, hdlrBox, ...mdiaKids, newMinfBox));
-
-    // tkhd — patch duration
-    const tkhdBuf = new Uint8Array(moovBuf.slice(tkhd.off, tkhd.off+tkhd.size));
-    const tkhdV = tkhdBuf[8];
-    wu32(tkhdBuf, tkhdV === 1 ? 36 : 28, Math.round(clipDurSeg * movieTimescale));
-    wu32(tkhdBuf, 0, tkhdBuf.byteLength);
-
-    // edts rebuild
-    let newEdtsBox = null;
-    if (track.elstEntries && track.elstEntries.length > 0) {
-      const clipMovieTicks = Math.round(clipDurSeg * movieTimescale);
-      const newEntries = [];
-      if (track.elstEntries.length === 1) {
-        newEntries.push({ segDur: clipMovieTicks, mediaTime: track.elstEntries[0].mediaTime });
-      } else {
-        let remaining = clipMovieTicks;
-        for (const e of track.elstEntries) {
-          if (e.mediaTime === 0xFFFFFFFF) {
-            newEntries.push({ segDur: e.segDur, mediaTime: 0xFFFFFFFF });
-            remaining -= e.segDur;
-          } else {
-            newEntries.push({ segDur: Math.max(remaining, 1), mediaTime: e.mediaTime });
-          }
-        }
-      }
-      newEdtsBox = buildElst(newEntries, movieTimescale);
-    }
-
-    const trakKids = [];
-    iterBoxes(moovView, track.trakOff+8, trakEnd, (name, o, size) => {
-      if (!['tkhd','mdia','edts'].includes(name))
-        trakKids.push(new Uint8Array(moovBuf.slice(o, o+size)));
-    });
-    newTrakBoxes.push(writeBox('trak',
-      concatU8(tkhdBuf, ...trakKids, ...(newEdtsBox ? [newEdtsBox] : []), newMdiaBox)));
-  }
-
-  // mvhd — patch duration
-  const mvhd   = findBox(moovView, 8, moovEnd, 'mvhd');
-  const mvhdBuf = new Uint8Array(moovBuf.slice(mvhd.off, mvhd.off+mvhd.size));
-  const mvhdV  = mvhdBuf[8];
-  const segDurSec = segSamples[segSamples.length-1].dts - segSamples[0].dts;
-  wu32(mvhdBuf, mvhdV === 1 ? 28 : 20, Math.round(segDurSec * movieTimescale));
-  wu32(mvhdBuf, 0, mvhdBuf.byteLength);
-
-  const moovKids = [];
-  iterBoxes(moovView, 8, moovEnd, (name, o, size) => {
-    if (!['mvhd','trak','udta'].includes(name))
-      moovKids.push(new Uint8Array(moovBuf.slice(o, o+size)));
-  });
-  const segMoovBox = writeBox('moov', concatU8(mvhdBuf, ...moovKids, ...newTrakBoxes));
-
-  // Patch stco absolute offsets
-  const segMdatAbsStart = ftypBox.byteLength + segMoovBox.byteLength + 8;
-  const snmv = new DataView(segMoovBox.buffer, segMoovBox.byteOffset, segMoovBox.byteLength);
-  function patchSegStco(view, arr, start, end) {
-    iterBoxes(view, start, end, (name, o, size, hs) => {
-      if (name === 'stco') {
-        const b = o+hs+4; const c = ru32(view, b);
-        for (let i = 0; i < c; i++) wu32(arr, b+4+i*4, segMdatAbsStart + ru32(view, b+4+i*4));
-      } else if (['moov','trak','mdia','minf','stbl'].includes(name)) {
-        patchSegStco(view, arr, o+hs, o+size);
-      }
-    });
-  }
-  patchSegStco(snmv, segMoovBox, 8, segMoovBox.byteLength);
-
-  // mdat header
-  const segMdatHdr = new Uint8Array(8);
-  const dv = new DataView(segMdatHdr.buffer);
-  dv.setUint32(0, segPayloadSize + 8);
-  dv.setUint32(4, 0x6d646174); // 'mdat'
-
-  return { segMoovBox, segMdatHdr };
-}
-
-function readChunk(start, end) {
-    for (let attempt = 0; attempt < 3; attempt++) {
-      try {
-        const buf = await new Promise((res, rej) => {
-          const r = new FileReader();
-          r.onload = ev => {
-            const ab = ev.target.result;
-            if (!ab || ab.byteLength === 0) rej(new Error('empty'));
-            else res(ab);
-          };
-          r.onerror = () => rej(new Error('fr'));
-          r.readAsArrayBuffer(currentFile.slice(start, end));
-        });
-        return new Uint8Array(buf);
-      } catch(_) {
-        if (attempt === 2) throw new Error('讀取失敗 @ ' + start);
-        await new Promise(r => setTimeout(r, 150 * (attempt + 1)));
-      }
-    }
-  }
-
-async function trimMp4(file, startSec, endSec, onProgress) {
-  const fileSize = file.size;
-
-  /* ── helpers ── */
-  /* readSlice: split into ≤128 MB chunks to avoid iOS FileReader size limit */
-  const FR_CHUNK = 128 * 1024 * 1024;
-  async function readSlice(s, e) {
-    const size = e - s;
-    if (size <= 0) return new ArrayBuffer(0);
-    if (size <= FR_CHUNK) {
-      return new Promise((res, rej) => {
-        const r = new FileReader();
-        r.onload = ev => res(ev.target.result);
-        r.onerror = ev => rej(new Error('FileReader error @ ' + s + '-' + e));
-        r.readAsArrayBuffer(file.slice(s, e));
-      });
-    }
-    // large slice: read in FR_CHUNK pieces and concat
-    const parts = [];
-    for (let pos = s; pos < e; pos += FR_CHUNK) {
-      if (exportCancelled) throw new Error('cancelled');
-      const part = await new Promise((res, rej) => {
-        const r = new FileReader();
-        r.onload = ev => res(ev.target.result);
-        r.onerror = ev => rej(new Error('FileReader error @ ' + pos));
-        r.readAsArrayBuffer(file.slice(pos, Math.min(pos + FR_CHUNK, e)));
-      });
-      parts.push(new Uint8Array(part));
-    }
-    const total = parts.reduce((s, a) => s + a.byteLength, 0);
-    const out = new Uint8Array(total); let off = 0;
-    for (const p of parts) { out.set(p, off); off += p.byteLength; }
-    return out.buffer;
-  }
-
-
-  /* ── locate moov by scanning top-level boxes ── */
-  onProgress(0.05, '掃描 moov…');
-  async function findMoov() {
-    const HDR=8; let pos=0;
-    while(pos+HDR<=fileSize){
-      if(exportCancelled) throw new Error('cancelled');
-      const chunkEnd=Math.min(pos+4*1024*1024,fileSize);
-      const buf=await readSlice(pos,chunkEnd);
-      const view=new DataView(buf);
-      let localOff=0;
-      while(localOff+HDR<=buf.byteLength){
-        let boxSize=view.getUint32(localOff,false);
-        const boxName=String.fromCharCode(view.getUint8(localOff+4),view.getUint8(localOff+5),view.getUint8(localOff+6),view.getUint8(localOff+7));
-        let hs=8;
-        if(boxSize===1){
-          if(localOff+16>buf.byteLength)break;
-          boxSize=view.getUint32(localOff+8,false)*0x100000000+view.getUint32(localOff+12,false);
-          hs=16;
-        } else if(boxSize===0){
-          boxSize=fileSize-(pos+localOff);
-        }
-        if(boxSize<hs)break;
-        if(boxName==='moov'){
-          const moovStart=pos+localOff;
-          const moovEnd2=moovStart+boxSize;
-          if(moovEnd2>fileSize) throw new Error('moov 超出檔案大小');
-          onProgress(0.08,'讀取 moov…');
-          const moovBuf=await readSlice(moovStart,moovEnd2);
-          return {moovStart,moovBuf};
-        }
-        const absBoxEnd=pos+localOff+boxSize;
-        if(absBoxEnd>fileSize||boxSize>fileSize)break;
-        if(absBoxEnd>chunkEnd-HDR){pos=absBoxEnd;localOff=buf.byteLength;}
-        else localOff+=boxSize;
-      }
-      if(pos<=chunkEnd) pos=chunkEnd;
-    }
-    throw new Error('找不到 moov box（可能不是標準 MP4/MOV 格式）');
-  }
-
-  const {moovStart,moovBuf}=await findMoov();
-  const moovView=new DataView(moovBuf);
-  const moovEnd=moovBuf.byteLength;
-
-  /* ── parse mvhd ── */
-  onProgress(0.12,'分析 track…');
-  const mvhd=findBox(moovView,8,moovEnd,'mvhd');
-  if(!mvhd) throw new Error('找不到 mvhd');
-  const mvhdVer=moovView.getUint8(mvhd.off+mvhd.hs);
-  const movieTimescale=ru32(moovView,mvhd.off+mvhd.hs+(mvhdVer===1?20:12));
-
-  /* ── parse all trak boxes ── */
-  const tracks=[];
-  iterBoxes(moovView,8,moovEnd,(name,o,size)=>{
-    if(name!=='trak')return;
-    const trakEnd=o+size;
-    const mdia=findBox(moovView,o+8,trakEnd,'mdia'); if(!mdia)return;
-    const mdiaEnd=mdia.off+mdia.size;
-    const mdhd=findBox(moovView,mdia.off+8,mdiaEnd,'mdhd'); if(!mdhd)return;
-    const mdhdVer=moovView.getUint8(mdhd.off+mdhd.hs);
-    const tScale=ru32(moovView,mdhd.off+mdhd.hs+(mdhdVer===1?20:12));
-    const minf=findBox(moovView,mdia.off+8,mdiaEnd,'minf'); if(!minf)return;
-    const stbl=findBox(moovView,minf.off+8,minf.off+minf.size,'stbl'); if(!stbl)return;
-    const stblEnd=stbl.off+stbl.size;
-
-    /* stts → DTS deltas */
-    const stts=findBox(moovView,stbl.off+8,stblEnd,'stts'); if(!stts)return;
-    const sttsBase=stts.off+stts.hs+4;
-    const sttsCount=ru32(moovView,sttsBase);
-    const sttsList=[];
-    for(let i=0;i<sttsCount;i++)
-      sttsList.push({count:ru32(moovView,sttsBase+4+i*8),delta:ru32(moovView,sttsBase+8+i*8)});
-
-    /* ctts → CTS (composition time offset) — CRITICAL for 120fps B-frame reorder */
-    const ctts=findBox(moovView,stbl.off+8,stblEnd,'ctts');
-    let ctsList=null;
-    if(ctts){
-      const cttsBase=ctts.off+ctts.hs+4;
-      const cttsCount=ru32(moovView,cttsBase);
-      ctsList=[];
-      for(let i=0;i<cttsCount;i++)
-        ctsList.push({count:ru32(moovView,cttsBase+4+i*8),offset:ri32(moovView,cttsBase+8+i*8)});
-    }
-
-    /* stss → keyframes (0-based) */
-    const stss=findBox(moovView,stbl.off+8,stblEnd,'stss');
-    let keyframes=null;
-    if(stss){
-      const sb=stss.off+stss.hs+4; const kc=ru32(moovView,sb);
-      keyframes=[];
-      for(let i=0;i<kc;i++) keyframes.push(ru32(moovView,sb+4+i*4)-1);
-    }
-
-    /* stsc */
-    const stsc=findBox(moovView,stbl.off+8,stblEnd,'stsc'); if(!stsc)return;
-    const stscBase=stsc.off+stsc.hs+4; const stscCount=ru32(moovView,stscBase);
-    const stscList=[];
-    for(let i=0;i<stscCount;i++)
-      stscList.push({firstChunk:ru32(moovView,stscBase+4+i*12)-1,samplesPerChunk:ru32(moovView,stscBase+8+i*12)});
-
-    /* stsz */
-    const stsz=findBox(moovView,stbl.off+8,stblEnd,'stsz'); if(!stsz)return;
-    const stszBase=stsz.off+stsz.hs+4;
-    const defaultSize=ru32(moovView,stszBase); const sampleCount=ru32(moovView,stszBase+4);
-    const sizes=[];
-    if(defaultSize===0){for(let i=0;i<sampleCount;i++)sizes.push(ru32(moovView,stszBase+8+i*4));}
-    else{for(let i=0;i<sampleCount;i++)sizes.push(defaultSize);}
-
-    /* stco / co64 */
-    const stco=findBox(moovView,stbl.off+8,stblEnd,'stco');
-    const co64=findBox(moovView,stbl.off+8,stblEnd,'co64');
-    const chunkOffsets=[];
-    if(stco){const b=stco.off+stco.hs+4;const c=ru32(moovView,b);for(let i=0;i<c;i++)chunkOffsets.push(ru32(moovView,b+4+i*4));}
-    else if(co64){const b=co64.off+co64.hs+4;const c=ru32(moovView,b);for(let i=0;i<c;i++)chunkOffsets.push(Number(ru64(moovView,b+4+i*8)));}
-    else return;
-
-    /* build DTS timeline */
-    const sampleTimes=[]; let dts=0;
-    for(const{count,delta}of sttsList){for(let j=0;j<count;j++){sampleTimes.push(dts);dts+=delta;}}
-
-    /* build CTS (composition offset) per sample */
-    const sampleCts=new Array(sampleCount).fill(0);
-    if(ctsList){let si2=0;for(const{count,offset}of ctsList){for(let j=0;j<count&&si2<sampleCount;j++,si2++)sampleCts[si2]=offset;}}
-
-    /* build sample → file-offset map */
-    const sampleOffsets=new Array(sampleCount).fill(0); let si=0;
-    for(let ci=0;ci<chunkOffsets.length;ci++){
-      const sc=stscList.reduce((best,e)=>e.firstChunk<=ci?e:best,stscList[0]);
-      let off=chunkOffsets[ci];
-      for(let j=0;j<sc.samplesPerChunk&&si<sampleCount;j++,si++){sampleOffsets[si]=off;off+=sizes[si];}
-    }
-
-    /* parse elst entries for later rebuild */
-    const elstEntries = []; // [{segDur, mediaTime}] in movie timescale / track timescale
-    const edtsB2 = findBox(moovView, o+8, trakEnd, 'edts');
-    if (edtsB2) {
-      const elstB2 = findBox(moovView, edtsB2.off+8, edtsB2.off+edtsB2.size, 'elst');
-      if (elstB2) {
-        const ev2 = elstB2.off + elstB2.hs;
-        const ver2 = moovView.getUint8(ev2);
-        const cnt2 = ru32(moovView, ev2+4);
-        for (let ei=0; ei<cnt2; ei++) {
-          let segDur, mediaTime;
-          if (ver2===1) {
-            segDur    = Number(ru64(moovView, ev2+8 + ei*20));
-            mediaTime = Number(ru64(moovView, ev2+8 + ei*20 + 8));
-          } else {
-            segDur    = ru32(moovView, ev2+8 + ei*12);
-            mediaTime = ru32(moovView, ev2+8 + ei*12 + 4);
-          }
-          elstEntries.push({ segDur, mediaTime });
-        }
-      }
-    }
-    tracks.push({tScale,sttsList,sampleTimes,sampleCts,sampleOffsets,sizes,keyframes,
-                 trakOff:o,trakSize:size,ctsList,elstEntries});
-  });
-  if(tracks.length===0) throw new Error('找不到 track 資料');
-
-  /* ── snap IN/OUT to keyframe boundaries ── */
-  onProgress(0.20,'定位 keyframe…');
-  function findSampleAtTime(track,sec){
-    const t=Math.round(sec*track.tScale); let idx=0;
-    for(let i=0;i<track.sampleTimes.length;i++){if(track.sampleTimes[i]<=t)idx=i;else break;}
-    return idx;
-  }
-  function snapKF(track,idx,dir){
-    if(!track.keyframes)return idx;
-    if(dir==='back'){for(let i=track.keyframes.length-1;i>=0;i--){if(track.keyframes[i]<=idx)return track.keyframes[i];}return track.keyframes[0]||0;}
-    for(let i=0;i<track.keyframes.length;i++){if(track.keyframes[i]>=idx)return track.keyframes[i];}
-    return track.sampleTimes.length-1;
-  }
-  const vidTrack=tracks.find(t=>t.keyframes!==null)||tracks[0];
-  const inSample =snapKF(vidTrack,findSampleAtTime(vidTrack,startSec),'back');
-  const outSample=snapKF(vidTrack,findSampleAtTime(vidTrack,endSec),'forward');
-  const actualStart=vidTrack.sampleTimes[inSample]/vidTrack.tScale;
-  const actualEnd  =vidTrack.sampleTimes[Math.min(outSample,vidTrack.sampleTimes.length-1)]/vidTrack.tScale;
-
-  /* ── collect sample ranges per track ── */
-  onProgress(0.28,'計算範圍…');
-  const rangesNeeded=[];
-  for(const track of tracks){
-    const tS=Math.round(actualStart*track.tScale);
-    const tE=Math.round(actualEnd*track.tScale);
-    let first=-1,last=-1;
-    // first: first sample at or after tS
-    for(let i=0;i<track.sampleTimes.length;i++){
-      if(track.sampleTimes[i]>=tS){ first=i; break; }
-    }
-    if(first===-1) first=track.sampleTimes.length-1; // fallback: last sample
-    // last: last sample before tE
-    for(let i=track.sampleTimes.length-1;i>=0;i--){
-      if(track.sampleTimes[i]<tE){ last=i; break; }
-    }
-    if(last===-1||last<first) last=first;
-    track._first=first; track._last=last;
-    for(let i=first;i<=last;i++)
-      rangesNeeded.push({start:track.sampleOffsets[i],end:track.sampleOffsets[i]+track.sizes[i]});
-  }
-  
-
-
-  rangesNeeded.sort((a,b)=>a.start-b.start);
-  const merged=[];
-  for(const r of rangesNeeded){
-    if(merged.length&&r.start<=merged[merged.length-1].end+65536)
-      merged[merged.length-1].end=Math.max(merged[merged.length-1].end,r.end);
-    else merged.push({...r});
-  }
-
-  /* ── build ordered sample list (no data read yet — stream later) ── */
-  onProgress(0.35,'計算輸出…');
-  const orderedSamples=[]; // [{fileStart, size}] in output order
-  const newChunkOffsets={};
-  let mdatOffset=0;
-  for(let ti=0;ti<tracks.length;ti++)newChunkOffsets[ti]=[];
-  for(let ti=0;ti<tracks.length;ti++){
-    const track=tracks[ti];
-    if(track._first===undefined)continue;
-    for(let i=track._first;i<=track._last;i++){
-      newChunkOffsets[ti].push(mdatOffset);
-      orderedSamples.push({fileStart:track.sampleOffsets[i],size:track.sizes[i],
-        ti, dts:(track.sampleTimes[i]/track.tScale),
-        isKF: ti===0 && track.keyframes && track.keyframes.includes(i)});
-      mdatOffset+=track.sizes[i];
-    }
-  }
-
-  const mdatPayloadSize=orderedSamples.reduce((s,r)=>s+r.size,0);
-
-  /* ── grab ftyp ── */
-  const ftypRaw=await readSlice(0,Math.min(512,fileSize));
-  const fv=new DataView(ftypRaw); let ftypBox=null;
-  if(r4cc(fv,4)==='ftyp')ftypBox=new Uint8Array(ftypRaw.slice(0,ru32(fv,0)));
-  if(!ftypBox){
-    const p=new Uint8Array(16);
-    'isom'.split('').forEach((c,i)=>p[i]=c.charCodeAt(0));
-    wu32(p,4,0x200);
-    'isom'.split('').forEach((c,i)=>p[8+i]=c.charCodeAt(0));
-    'mp41'.split('').forEach((c,i)=>p[12+i]=c.charCodeAt(0));
-    ftypBox=writeBox('ftyp',p);
-  }
-
-  /* ── box builders ── */
-  
-
-  
-
-  
-
-  
-
-  
-
-  
-
-  
-
-
-  /* ── rebuild each trak ── */
-  const newTrakBoxes=[];
-  for(let ti=0;ti<tracks.length;ti++){
-    const track=tracks[ti];
-    if(track._first===undefined)continue;
-    const first=track._first, last=track._last;
-    const clipDur=actualEnd-actualStart;
-    const trakEnd=track.trakOff+track.trakSize;
-    const mdia=findBox(moovView,track.trakOff+8,trakEnd,'mdia');
-    const mdiaEnd=mdia.off+mdia.size;
-    const minf=findBox(moovView,mdia.off+8,mdiaEnd,'minf');
-    const stbl=findBox(moovView,minf.off+8,minf.off+minf.size,'stbl');
-    const stblEnd=stbl.off+stbl.size;
-    const tkhd=findBox(moovView,track.trakOff+8,trakEnd,'tkhd');
-    const mdhd=findBox(moovView,mdia.off+8,mdiaEnd,'mdhd');
-    const hdlr=findBox(moovView,mdia.off+8,mdiaEnd,'hdlr');
-
-    /* ── per-sample DTS deltas (fix last-sample edge) ── */
-    const newDeltas=[];
-    for(let i=first;i<=last;i++){
-      let delta;
-      if(i+1<track.sampleTimes.length){
-        delta=track.sampleTimes[i+1]-track.sampleTimes[i];
-      } else {
-        // last sample: reuse previous delta or derive from stts
-        delta = newDeltas.length>0 ? newDeltas[newDeltas.length-1] : (track.sttsList[0]?.delta||1);
-      }
-      newDeltas.push(Math.max(1,delta)); // guard against 0
-    }
-
-    /* ── per-sample CTS offsets (trim to clip window) ── */
-    let newCttsBox=null;
-    if(track.ctsList){
-      const newCts=[];
-      for(let i=first;i<=last;i++) newCts.push(track.sampleCts[i]);
-      // only emit ctts if any offset is non-zero
-      if(newCts.some(v=>v!==0)) newCttsBox=buildCtts(newCts);
-    }
-
-    /* ── keyframes: re-index to new 0-based positions ── */
-    let newStss=null;
-    if(track.keyframes){
-      const nkf=[];
-      const kfSet=new Set(track.keyframes);
-      for(let i=0;i<=last-first;i++){
-        if(kfSet.has(first+i)) nkf.push(i);
-      }
-      // safety: if none found, mark first sample as keyframe
-      if(nkf.length===0) nkf.push(0);
-      newStss=buildStss(nkf);
-    }
-
-    /* ── new sizes ── */
-    const newSizes=[];
-    for(let i=first;i<=last;i++) newSizes.push(track.sizes[i]);
-
-    /* ── stbl: copy stsd only, rebuild everything else ── */
-    const stblKids=[];
-    iterBoxes(moovView,stbl.off+8,stblEnd,(name,o,size)=>{
-      // keep stsd (codec config), skip all timing/offset boxes
-      if(name==='stsd') stblKids.push(new Uint8Array(moovBuf.slice(o,o+size)));
-    });
-    const newStblBox=writeBox('stbl',concatU8(
-      ...stblKids,
-      buildStts(newDeltas),
-      ...(newCttsBox?[newCttsBox]:[]),
-      ...(newStss?[newStss]:[]),
-      buildStsz(newSizes),
-      buildStsc(),
-      buildStco(newChunkOffsets[ti])
-    ));
-
-    /* ── minf: copy dinf+smhd/vmhd/soun, replace stbl ── */
-    const minfKids=[];
-    iterBoxes(moovView,minf.off+8,minf.off+minf.size,(name,o,size)=>{
-      if(name!=='stbl') minfKids.push(new Uint8Array(moovBuf.slice(o,o+size)));
-    });
-    const newMinfBox=writeBox('minf',concatU8(...minfKids,newStblBox));
-
-    /* ── mdhd: patch duration ── */
-    const mdhdBuf=new Uint8Array(moovBuf.slice(mdhd.off,mdhd.off+mdhd.size));
-    const mdhdV=mdhdBuf[8];
-    wu32(mdhdBuf,mdhdV===1?8+20:8+16,Math.round(clipDur*track.tScale));
-    wu32(mdhdBuf,0,mdhdBuf.byteLength);
-
-    /* ── hdlr: copy as-is ── */
-    const hdlrBox=new Uint8Array(moovBuf.slice(hdlr.off,hdlr.off+hdlr.size));
-
-    /* ── mdia: mdhd + hdlr + other children (skip edts/elst) + minf ── */
-    const mdiaKids=[];
-    iterBoxes(moovView,mdia.off+8,mdiaEnd,(name,o,size)=>{
-      if(!['mdhd','hdlr','minf'].includes(name))
-        mdiaKids.push(new Uint8Array(moovBuf.slice(o,o+size)));
-    });
-    const newMdiaBox=writeBox('mdia',concatU8(mdhdBuf,hdlrBox,...mdiaKids,newMinfBox));
-
-    /* ── tkhd: patch duration ── */
-    const tkhdBuf=new Uint8Array(moovBuf.slice(tkhd.off,tkhd.off+tkhd.size));
-    const tkhdV=tkhdBuf[8];
-    wu32(tkhdBuf,tkhdV===1?8+28:8+20,Math.round(clipDur*movieTimescale));
-    wu32(tkhdBuf,0,tkhdBuf.byteLength);
-
-    /* ── trak: tkhd + rebuilt edts (preserves encoder delay) + new mdia ── */
-    const trakKids=[];
-    iterBoxes(moovView,track.trakOff+8,trakEnd,(name,o,size)=>{
-      if(!['tkhd','mdia','edts'].includes(name))
-        trakKids.push(new Uint8Array(moovBuf.slice(o,o+size)));
-    });
-    // Rebuild elst: preserve structure but update segment durations to clip length
-    let newEdtsBox = null;
-    if (track.elstEntries.length > 0) {
-      const clipMovieTicks = Math.round(clipDur * movieTimescale);
-      const newEntries = [];
-      if (track.elstEntries.length === 1) {
-        // Single entry: just update segDur, keep mediaTime
-        newEntries.push({ segDur: clipMovieTicks, mediaTime: track.elstEntries[0].mediaTime });
-      } else {
-        // Multi-entry (e.g. empty edit + real audio):
-        // Keep all empty edits (mediaTime=0xFFFFFFFF) with original segDur,
-        // set the last real entry's segDur to remaining clip duration
-        let remaining = clipMovieTicks;
-        for (let ei=0; ei<track.elstEntries.length; ei++) {
-          const e = track.elstEntries[ei];
-          const isEmpty = (e.mediaTime === 0xFFFFFFFF);
-          if (isEmpty) {
-            newEntries.push({ segDur: e.segDur, mediaTime: 0xFFFFFFFF });
-            remaining -= e.segDur;
-          } else {
-            // last real entry — use remaining duration, keep original mediaTime
-            newEntries.push({ segDur: Math.max(remaining, 1), mediaTime: e.mediaTime });
-          }
-        }
-      }
-      newEdtsBox = buildElst(newEntries, movieTimescale);
-    }
-    newTrakBoxes.push(writeBox('trak',concatU8(tkhdBuf,...trakKids,...(newEdtsBox?[newEdtsBox]:[]),newMdiaBox)));
-  }
-
-  /* ── mvhd: patch duration ── */
-  const mvhdBuf=new Uint8Array(moovBuf.slice(mvhd.off,mvhd.off+mvhd.size));
-  wu32(mvhdBuf,mvhdVer===1?8+20:8+16,Math.round((actualEnd-actualStart)*movieTimescale));
-  wu32(mvhdBuf,0,mvhdBuf.byteLength);
-
-  /* ── copy other moov children (skip udta/meta if desired, keep as-is) ── */
-  const moovOther=[];
-  iterBoxes(moovView,8,moovEnd,(name,o,size)=>{
-    if(!['mvhd','trak'].includes(name))
-      moovOther.push(new Uint8Array(moovBuf.slice(o,o+size)));
-  });
-
-  /* ── assemble moov with placeholder stco ── */
-  let newMoovBox=writeBox('moov',concatU8(mvhdBuf,...newTrakBoxes,...moovOther));
-
-  /* ── patch stco: add absolute mdat start offset ── */
-  const mdatAbsStart=ftypBox.byteLength+newMoovBox.byteLength+8;
-  const nmv=new DataView(newMoovBox.buffer,newMoovBox.byteOffset,newMoovBox.byteLength);
-  function patchStco(view,arr,start,end){
-    iterBoxes(view,start,end,(name,o,size,hs)=>{
-      if(name==='stco'){
-        const b=o+hs+4; const c=ru32(view,b);
-        for(let i=0;i<c;i++) wu32(arr,b+4+i*4,mdatAbsStart+ru32(view,b+4+i*4));
-      } else if(['moov','trak','mdia','minf','stbl'].includes(name)){
-        patchStco(view,arr,o+hs,o+size);
-      }
-    });
-  }
-  patchStco(nmv,newMoovBox,8,newMoovBox.byteLength);
-
-  /* ── return structured parts — caller handles chunked download ── */
-  onProgress(0.93,'組合輸出…');
-  const mdatHeader=new Uint8Array(8);
-  wu32(mdatHeader,0,8+mdatPayloadSize);
-  'mdat'.split('').forEach((c,i)=>mdatHeader[4+i]=c.charCodeAt(0));
-  return { ftypBox, newMoovBox, mdatHeader, orderedSamples, _moovBuf: moovBuf, _tracks: tracks, _movieTimescale: movieTimescale };
-}
-
-/* ═══════════════════════════════════════════════
-   trimByMediaRecorder(): fallback for WebM etc.
-   Uses captureStream() + MediaRecorder.
-   ═══════════════════════════════════════════════ */
-async function trimByMediaRecorder(startSec, endSec, onProgress) {
-  return new Promise((resolve, reject) => {
-    const stream = video.captureStream
-      ? video.captureStream()
-      : video.mozCaptureStream
-        ? video.mozCaptureStream()
-        : null;
-    if (!stream) { reject(new Error('此瀏覽器不支援 captureStream')); return; }
-
-    const mime = MediaRecorder.isTypeSupported('video/webm;codecs=vp9,opus') ? 'video/webm;codecs=vp9,opus'
-               : MediaRecorder.isTypeSupported('video/webm;codecs=vp8,opus') ? 'video/webm;codecs=vp8,opus'
-               : 'video/webm';
-    const chunks = [];
-    const mr = new MediaRecorder(stream, { mimeType: mime });
-    mr.ondataavailable = e => { if (e.data.size > 0) chunks.push(e.data); };
-    mr.onstop = () => resolve({ blob: new Blob(chunks, {type: mime}), ext: 'webm' });
-    mr.onerror = e => reject(e.error);
-
-    const clipDur = endSec - startSec;
-    video.currentTime = startSec;
-    video.addEventListener('seeked', function startRec() {
-      video.removeEventListener('seeked', startRec);
-      mr.start(100); video.play();
-      const check = setInterval(() => {
-        if (exportCancelled) { clearInterval(check); mr.stop(); video.pause(); reject(new Error('cancelled')); return; }
-        onProgress(Math.min(0.95, 0.1 + (video.currentTime - startSec) / clipDur * 0.85), '即時錄製中…');
-        if (video.currentTime >= endSec - 0.05) { clearInterval(check); video.pause(); mr.stop(); }
-      }, 200);
-    }, { once: true });
-  });
-}
-
-/* ── buildSegmentHeaders: rebuild ftyp+moov+mdat-header for a sub-range of samples ── */
-async 
-
-
-
-/* ── ✂ Export button — chunked download ── */
-/* Strategy: trimMp4 returns {ftypBox, newMoovBox, mdatParts, mdatPayloadSize}.
-   We build ftyp+moov+mdat_header once (tiny), then stream mdat sample-blobs
-   in CHUNK_MB slices so Safari never holds >~100 MB at once.            */
 
 document.getElementById('loop-export').addEventListener('click', async e => {
   e.stopPropagation();
-  if (loopIn === null || loopOut === null) { showToast('請先設定 IN / OUT'); return; }
+
+  if (loopIn === null || loopOut === null) {
+    showToast('請先設定 IN / OUT'); return;
+  }
   if (!currentFile) { showToast('沒有影片檔案'); return; }
 
   exportCancelled = false;
@@ -2317,218 +1475,119 @@ document.getElementById('loop-export').addEventListener('click', async e => {
   exportStatus.textContent = '準備中…';
   exportProgressF.style.width = '0%';
 
-  const ext      = currentFile.name.split('.').pop().toLowerCase();
-  const base     = currentFile.name.replace(/\.[^.]+$/, '') || 'clip';
-  const ss       = loopIn.toFixed(3);
-  const mimeType = ext === 'mov' ? 'video/quicktime' : 'video/mp4';
-  const filename = `${base}_clip_${ss.replace('.','_')}.${ext}`;
-
-  /* readChunk: read a slice of currentFile with retry.
-     Safari iOS FileReader can fail on large or misaligned reads — retry up to 3× */
-  async 
-
-
   try {
-    if (['mp4','mov','m4v'].includes(ext)) {
-      const result = await trimMp4(currentFile, loopIn, loopOut, (ratio, msg) => {
-        if (exportCancelled) throw new Error('cancelled');
-        exportProgressF.style.width = Math.round(ratio * 100) + '%';
-        exportStatus.textContent = msg;
+    const { createFFmpeg, fetchFile } = FFmpeg;
+
+    if (!ffmpegInstance) {
+      ffmpegInstance = createFFmpeg({
+        log: false,
+        corePath: window.location.origin + '/ffmpeg/ffmpeg-core.js',
       });
-      if (exportCancelled) { exportOverlay.classList.remove('show'); return; }
-
-      const { ftypBox, newMoovBox, mdatHeader, orderedSamples } = result;
-
-      const SPLIT_LIMIT = 300 * 1024 * 1024; // 300 MB per segment
-      const totalBytes = orderedSamples.reduce((s, r) => s + r.size, 0);
-      const headerBytes = ftypBox.byteLength + newMoovBox.byteLength + mdatHeader.byteLength;
-
-      // Calculate how many segments needed
-      const totalOutputBytes = headerBytes + totalBytes;
-      const segCount = Math.ceil(totalOutputBytes / SPLIT_LIMIT);
-
-      // Ask user confirmation if multi-segment
-      if (segCount > 1) {
-        const ok = window.confirm(
-          `輸出檔案約 ${(totalOutputBytes/1024/1024).toFixed(0)} MB，\n` +
-          `將自動切成 ${segCount} 段（每段 ≤300 MB），\n` +
-          `每段為獨立完整的影片檔案。\n\n確定要繼續嗎？`
-        );
-        if (!ok) { exportOverlay.classList.remove('show'); return; }
-      }
-
-      // Build sample batches (preserve output order, batch only physically adjacent source bytes)
-      const batches = [];
-      for (const s of orderedSamples) {
-        const last = batches[batches.length - 1];
-        if (last && last.srcEnd === s.fileStart) {
-          last.srcEnd = s.fileStart + s.size;
-          last.outSize += s.size;
-        } else {
-          batches.push({ srcStart: s.fileStart, srcEnd: s.fileStart + s.size, outSize: s.size });
-        }
-      }
-
-      // Helper: read all batches in output order, call onChunk(Uint8Array) for each piece
-      async function readAllChunks(onChunk, onProgress) {
-        const PIECE = 512 * 1024;
-        let readBytes = 0;
-        for (const batch of batches) {
-          if (exportCancelled) return false;
-          let pos = batch.srcStart;
-          while (pos < batch.srcEnd) {
-            if (exportCancelled) return false;
-            const chunkEnd = Math.min(pos + PIECE, batch.srcEnd);
-            const chunk = await readChunk(pos, chunkEnd);
-            onChunk(new Uint8Array(chunk));
-            readBytes += chunkEnd - pos;
-            onProgress(readBytes, totalBytes);
-            pos = chunkEnd;
-            await new Promise(r => setTimeout(r, 0));
-          }
-        }
-        return true;
-      }
-
-      // Helper: trigger download of a Blob
-      function triggerDownload(blob, fname) {
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url; a.download = fname;
-        document.body.appendChild(a); a.click(); document.body.removeChild(a);
-        setTimeout(() => URL.revokeObjectURL(url), 30000);
-      }
-
-      exportProgressF.style.width = '68%';
-      exportStatus.textContent = '讀取資料…';
-
-      if (segCount === 1) {
-        // Single segment — original simple path
-        const parts = [ftypBox, newMoovBox, mdatHeader];
-        const ok = await readAllChunks(
-          chunk => parts.push(chunk),
-          (rb, tb) => {
-            exportProgressF.style.width = Math.round(68 + 28 * rb / tb) + '%';
-            exportStatus.textContent = `讀取 ${Math.round(100 * rb / tb)}%…`;
-          }
-        );
-        if (!ok || exportCancelled) { exportOverlay.classList.remove('show'); return; }
-        exportProgressF.style.width = '98%';
-        exportStatus.textContent = '下載中…';
-        triggerDownload(new Blob(parts, { type: mimeType }), filename);
-
-      } else {
-        // Multi-segment: split at keyframe boundaries closest to each 300MB mark
-        const PAYLOAD_LIMIT = SPLIT_LIMIT - headerBytes;
-
-        // Find keyframe positions (isKF=true, ti=0) in orderedSamples
-        // Split so each segment payload ≤ PAYLOAD_LIMIT, always ending at a keyframe
-        const segments = [];
-        let segStart = 0;
-        let segBytes = 0;
-        for (let si = 0; si < orderedSamples.length; si++) {
-          const s = orderedSamples[si];
-          segBytes += s.size;
-          const isLast = si === orderedSamples.length - 1;
-          // Cut here if: over limit AND next sample is a keyframe (or last)
-          const nextIsKF = si + 1 < orderedSamples.length &&
-            orderedSamples[si+1].isKF && orderedSamples[si+1].ti === 0;
-          if ((segBytes >= PAYLOAD_LIMIT && nextIsKF) || isLast) {
-            segments.push(orderedSamples.slice(segStart, si+1));
-            segStart = si + 1;
-            segBytes = 0;
-          }
-        }
-
-        // Re-fetch moovBuf for segment header rebuilding
-        const moovBufForSeg = result._moovBuf;
-
-        for (let si = 0; si < segments.length; si++) {
-          if (exportCancelled) { exportOverlay.classList.remove('show'); return; }
-          const seg = segments[si];
-          exportStatus.textContent = `第 ${si+1}/${segments.length} 段 — 建立標頭…`;
-          await new Promise(r => setTimeout(r, 0));
-
-          const { segMoovBox, segMdatHdr } = await buildSegmentHeaders(
-            result._tracks, seg, result._movieTimescale, ftypBox, moovBufForSeg
-          );
-
-          // Read segment samples
-          const segBatches = [];
-          for (const s of seg) {
-            const last = segBatches[segBatches.length-1];
-            if (last && last.srcEnd === s.fileStart) {
-              last.srcEnd = s.fileStart + s.size;
-            } else {
-              segBatches.push({ srcStart: s.fileStart, srcEnd: s.fileStart + s.size });
-            }
-          }
-
-          const segParts = [ftypBox, segMoovBox, segMdatHdr];
-          const segTotal = seg.reduce((a,s)=>a+s.size,0);
-          let segRead = 0;
-          const PIECE = 512 * 1024;
-          for (const batch of segBatches) {
-            if (exportCancelled) { exportOverlay.classList.remove('show'); return; }
-            let pos = batch.srcStart;
-            while (pos < batch.srcEnd) {
-              if (exportCancelled) { exportOverlay.classList.remove('show'); return; }
-              const chunkEnd = Math.min(pos + PIECE, batch.srcEnd);
-              const chunk = await readChunk(pos, chunkEnd);
-              segParts.push(new Uint8Array(chunk));
-              segRead += chunkEnd - pos;
-              pos = chunkEnd;
-              exportProgressF.style.width = Math.round(68 + 28 * segRead / segTotal) + '%';
-              exportStatus.textContent = `第 ${si+1}/${segments.length} 段 — 讀取 ${Math.round(100*segRead/segTotal)}%`;
-              await new Promise(r => setTimeout(r, 0));
-            }
-          }
-
-          exportProgressF.style.width = '98%';
-          exportStatus.textContent = `第 ${si+1}/${segments.length} 段 — 下載中…`;
-          const segFilename = filename.replace(/(\.[^.]+)$/, `_part${si+1}of${segments.length}$1`);
-          triggerDownload(new Blob(segParts, { type: mimeType }), segFilename);
-          // Small delay between downloads so browser processes each one
-          await new Promise(r => setTimeout(r, 1500));
-        }
-      }
-
-      exportProgressF.style.width = '100%';
-      exportStatus.textContent = '完成！';
-      setTimeout(() => exportOverlay.classList.remove('show'), 1400);
-      showToast('剪輯完成');
-
-    } else {
-      exportStatus.textContent = '即時錄製模式…';
-      exportProgressF.style.width = '5%';
-      const { blob, ext: outExt } = await trimByMediaRecorder(loopIn, loopOut, (ratio, msg) => {
-        exportProgressF.style.width = Math.round(ratio * 100) + '%';
-        exportStatus.textContent = msg;
-      });
-      if (exportCancelled) { exportOverlay.classList.remove('show'); return; }
-      const url = URL.createObjectURL(blob);
-      const a   = document.createElement('a');
-      a.href = url; a.download = `${base}_clip_${ss.replace('.','_')}.${outExt}`;
-      document.body.appendChild(a); a.click(); document.body.removeChild(a);
-      setTimeout(() => URL.revokeObjectURL(url), 30000);
-      exportProgressF.style.width = '100%';
-      exportStatus.textContent = '完成！';
-      setTimeout(() => exportOverlay.classList.remove('show'), 1400);
-      showToast('剪輯完成');
     }
+
+    if (!ffmpegLoaded) {
+      exportStatus.textContent = '載入 FFmpeg…（首次約需 30 秒）';
+      await ffmpegInstance.load();
+      ffmpegLoaded = true;
+    }
+
+    if (exportCancelled) { exportOverlay.classList.remove('show'); return; }
+
+    ffmpegInstance.setProgress(({ ratio }) => {
+      if (ratio >= 0) exportProgressF.style.width = Math.min(95, Math.round(ratio * 100)) + '%';
+    });
+
+    exportStatus.textContent = '寫入檔案…';
+    exportProgressF.style.width = '5%';
+
+    const ext = currentFile.name.split('.').pop() || 'mp4';
+    const inName = 'input.' + ext;
+    ffmpegInstance.FS('writeFile', inName, await fetchFile(currentFile));
+
+    if (exportCancelled) { exportOverlay.classList.remove('show'); return; }
+
+    exportStatus.textContent = '剪輯中…';
+    exportProgressF.style.width = '10%';
+
+    const ss  = loopIn.toFixed(3);
+    const dur = (loopOut - loopIn).toFixed(3);
+    const formatSel = document.getElementById('export-format').value;
+    const srcExt = ext.toLowerCase();
+    const outExt = formatSel === 'original' ? srcExt
+                 : formatSel;
+    const outName = 'clip.' + outExt;
+    const needsReencode = outExt !== srcExt;
+
+    if (needsReencode) {
+      // Format conversion + clip: re-encode
+      await ffmpegInstance.run(
+        '-ss', ss,
+        '-i', inName,
+        '-t', dur,
+        '-map', '0:v:0',
+        '-map', '0:a:0?',
+        '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '18',
+        '-c:a', 'aac', '-b:a', '128k',
+        '-movflags', '+faststart',
+        outName
+      );
+    } else {
+      // -ss/-to as input options snap to keyframes; -t as output trims trailing blank
+      const toTime = loopOut.toFixed(3);
+      await ffmpegInstance.run(
+        '-ss', ss,
+        '-to', toTime,
+        '-i', inName,
+        '-t', dur,
+        '-map', '0:v:0',
+        '-map', '0:a:0?',
+        '-c', 'copy',
+        outName
+      );
+    }
+
+    if (exportCancelled) { exportOverlay.classList.remove('show'); return; }
+
+    exportStatus.textContent = '輸出中…';
+    exportProgressF.style.width = '95%';
+
+    const mimeType = outExt === 'mov' ? 'video/quicktime'
+                   : outExt === 'mp4' ? 'video/mp4'
+                   : 'video/' + outExt;
+    const data = ffmpegInstance.FS('readFile', outName);
+    const blob = new Blob([data.buffer], { type: mimeType });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    const base = currentFile.name.replace(/\.[^.]+$/, '') || 'clip';
+    a.href = url;
+    a.download = `${base}_clip_${ss.replace('.','_')}.${outExt}`;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 3000);
+
+    try { ffmpegInstance.FS('unlink', inName); } catch(e) {}
+    try { ffmpegInstance.FS('unlink', outName); } catch(e) {}
+
+    exportProgressF.style.width = '100%';
+    exportStatus.textContent = '完成！';
+    setTimeout(() => exportOverlay.classList.remove('show'), 1500);
+    showToast('剪輯完成');
+
   } catch(err) {
     exportOverlay.classList.remove('show');
-    if (err.message !== 'cancelled') showToast('剪輯失敗：' + (err.message || err));
+    showToast('剪輯失敗：' + (err.message || err));
   }
 });
 
 exportCancelBtn.addEventListener('click', () => {
   exportCancelled = true;
+  if (ffmpegInstance) { try { ffmpegInstance.exit(); } catch(e) {} }
+  ffmpegInstance = null;
+  ffmpegLoaded = false;
   exportOverlay.classList.remove('show');
   showToast('已取消');
 });
 
-// ── ⇄ Convert only (MOV ↔ MP4 container rebrand, no re-encode needed) ──
+// ── Convert only (no clip, -c copy) ──
 document.getElementById('loop-convert').addEventListener('click', async e => {
   e.stopPropagation();
   if (!currentFile) { showToast('沒有影片檔案'); return; }
@@ -2537,26 +1596,98 @@ document.getElementById('loop-convert').addEventListener('click', async e => {
   const srcExt = currentFile.name.split('.').pop().toLowerCase();
   const outExt = formatSel === 'original' ? srcExt : formatSel;
 
-  if (outExt === srcExt) { showToast('格式相同，無需轉換'); return; }
+  if (outExt === srcExt) {
+    showToast('格式相同，無需轉換'); return;
+  }
 
   const base = currentFile.name.replace(/\.[^.]+$/, '') || 'video';
 
-  // iPhone MOV ↔ MP4: both are ISO Base Media containers — just rebrand
-  const isISOSwap = (['mov','mp4','m4v'].includes(srcExt) && ['mov','mp4','m4v'].includes(outExt));
+  // iPhone MOV ↔ MP4: both are ISOBMFF containers — just rebrand, no FFmpeg needed
+  const isISOSwap = (srcExt === 'mov' && outExt === 'mp4') ||
+                    (srcExt === 'mp4' && outExt === 'mov');
   if (isISOSwap) {
     const mimeType = outExt === 'mp4' ? 'video/mp4' : 'video/quicktime';
     const blob = new Blob([currentFile], { type: mimeType });
     const url  = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url; a.download = `${base}.${outExt}`;
+    const a    = document.createElement('a');
+    a.href = url;
+    a.download = `${base}.${outExt}`;
     document.body.appendChild(a); a.click(); document.body.removeChild(a);
     setTimeout(() => URL.revokeObjectURL(url), 3000);
     showToast(`轉換完成 → ${outExt.toUpperCase()}`);
-  } else {
-    showToast('此格式轉換目前不支援（需 FFmpeg）');
+    return;
+  }
+
+  // Other format conversions: use FFmpeg
+  exportCancelled = false;
+  exportOverlay.classList.add('show');
+  exportStatus.textContent = '準備中…';
+  exportProgressF.style.width = '0%';
+
+  try {
+    const { createFFmpeg, fetchFile } = FFmpeg;
+
+    if (!ffmpegInstance) {
+      ffmpegInstance = createFFmpeg({
+        log: false,
+        corePath: window.location.origin + '/ffmpeg/ffmpeg-core.js',
+      });
+    }
+    if (!ffmpegLoaded) {
+      exportStatus.textContent = '載入 FFmpeg…（首次約需 30 秒）';
+      await ffmpegInstance.load();
+      ffmpegLoaded = true;
+    }
+
+    if (exportCancelled) { exportOverlay.classList.remove('show'); return; }
+
+    exportStatus.textContent = '寫入檔案…';
+    exportProgressF.style.width = '10%';
+
+    const inName = 'input.' + srcExt;
+    ffmpegInstance.FS('writeFile', inName, await fetchFile(currentFile));
+
+    if (exportCancelled) { exportOverlay.classList.remove('show'); return; }
+
+    exportStatus.textContent = `轉換 ${srcExt.toUpperCase()} → ${outExt.toUpperCase()}…`;
+    exportProgressF.style.width = '20%';
+
+    const outName = 'output.' + outExt;
+    await ffmpegInstance.run(
+      '-i', inName,
+      '-c', 'copy',
+      '-movflags', '+faststart',
+      outName
+    );
+
+    if (exportCancelled) { exportOverlay.classList.remove('show'); return; }
+
+    exportProgressF.style.width = '95%';
+    exportStatus.textContent = '輸出中…';
+
+    const mimeType = outExt === 'mov' ? 'video/quicktime' : 'video/mp4';
+    const data = ffmpegInstance.FS('readFile', outName);
+    const blob = new Blob([data.buffer], { type: mimeType });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    a.href = url;
+    a.download = `${base}.${outExt}`;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 3000);
+
+    try { ffmpegInstance.FS('unlink', inName); } catch(e) {}
+    try { ffmpegInstance.FS('unlink', outName); } catch(e) {}
+
+    exportProgressF.style.width = '100%';
+    exportStatus.textContent = '完成！';
+    setTimeout(() => exportOverlay.classList.remove('show'), 1500);
+    showToast(`轉換完成 → ${outExt.toUpperCase()}`);
+
+  } catch(err) {
+    exportOverlay.classList.remove('show');
+    showToast('轉換失敗：' + (err.message || err));
   }
 });
-
 </script>
 </body>
 </html>
