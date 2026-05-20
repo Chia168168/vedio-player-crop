@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<meta name="apple-mobile-web-app-capable" content="yes">
+<!-- apple-mobile-web-app-capable removed: causes file-input reload on iOS -->
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Frame Player">
 <meta name="theme-color" content="#0a0a0c">
@@ -839,13 +839,7 @@ document.body.appendChild(changeInput);
 fileInput.addEventListener('change', e => {
   const f = e.target.files && e.target.files[0];
   if (!f) return;
-  uploadScreen.classList.add('hidden');
-  playerScreen.classList.add('visible');
-  requestAnimationFrame(() => {
-    requestAnimationFrame(() => {
-      loadVideoFile(f);
-    });
-  });
+  loadVideoFile(f);
 });
 changeInput.addEventListener('change', e => {
   const f = e.target.files && e.target.files[0];
@@ -884,8 +878,8 @@ function loadVideoFile(file) {
     showToast('無法開啟檔案'); return;
   }
 
-  uploadScreen.classList.add('hidden');
-  playerScreen.classList.add('visible');
+  uploadScreen.style.display = 'none';
+  playerScreen.style.display = 'block';
   showPanel();
   requestWakeLock();
 
@@ -2568,6 +2562,14 @@ document.getElementById('loop-convert').addEventListener('click', async e => {
   }
 });
 
+
+
+/* upload zone tap → open file picker */
+document.querySelector('.upload-zone').addEventListener('click', function(e) {
+  e.stopPropagation();
+  document.getElementById('file-input').click();
+});
 </script>
+<input type="file" id="file-input" accept="video/*" style="position:fixed;left:-200vw;top:0;opacity:0;pointer-events:none;">
 </body>
 </html>
