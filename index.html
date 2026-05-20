@@ -1700,6 +1700,7 @@ async function trimMp4(file, startSec, endSec, onProgress) {
   /* ── collect sample ranges per track ── */
   onProgress(0.28,'計算範圍…');
   const rangesNeeded=[];
+  let dbgStr = `actualStart=${actualStart.toFixed(4)}s actualEnd=${actualEnd.toFixed(4)}s`;
   for(const track of tracks){
     const tS=Math.round(actualStart*track.tScale);
     const tE=Math.round(actualEnd*track.tScale);
@@ -1715,9 +1716,13 @@ async function trimMp4(file, startSec, endSec, onProgress) {
     }
     if(last===-1||last<first) last=first;
     track._first=first; track._last=last;
+    const ti = tracks.indexOf(track);
+    dbgStr += ` | T${ti}: first_t=${(track.sampleTimes[first]/track.tScale).toFixed(4)}s last_t=${(track.sampleTimes[last]/track.tScale).toFixed(4)}s`;
     for(let i=first;i<=last;i++)
       rangesNeeded.push({start:track.sampleOffsets[i],end:track.sampleOffsets[i]+track.sizes[i]});
   }
+  exportStatus.textContent = dbgStr;
+  await new Promise(r=>setTimeout(r, 12000));
   await new Promise(r=>setTimeout(r,10000)); // freeze to read debug
 
   /* debug: show track info in visible overlay */
