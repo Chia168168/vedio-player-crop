@@ -1473,6 +1473,108 @@ let exportCancelled = false;
         elst removal, stsd passthrough.
    No WASM. Supports any file size.
    ═══════════════════════════════════════════════ */
+
+/* helpers hoisted for Safari scope */
+
+function buildStts(deltas){
+    /* deltas = array of per-sample delta values (numbers) */
+    const runs=[];
+    for(let i=0;i<deltas.length;){
+      const d=deltas[i]; let c=1;
+      while(i+c<deltas.length&&deltas[i+c]===d)c++;
+      runs.push({count:c,delta:d}); i+=c;
+    }
+    const p=new Uint8Array(8+runs.length*8);
+    wu32(p,0,0);wu32(p,4,runs.length);
+    for(let i=0;i<runs.length;i++){wu32(p,8+i*8,runs[i].count);wu32(p,12+i*8,runs[i].delta);}
+    return writeBox('stts',p);
+  }
+
+function buildCtts(ctsArr){
+    /* ctsArr = array of per-sample CTS offset values (signed int32) */
+    const runs=[];
+    for(let i=0;i<ctsArr.length;){
+      const d=ctsArr[i]; let c=1;
+      while(i+c<ctsArr.length&&ctsArr[i+c]===d)c++;
+      runs.push({count:c,offset:d}); i+=c;
+    }
+    /* version=1 for signed offsets (required for negative CTS on newer iPhone) */
+    const p=new Uint8Array(8+runs.length*8);
+    p[0]=1; // version=1
+    wu32(p,4,runs.length);
+    const pv=new DataView(p.buffer);
+    for(let i=0;i<runs.length;i++){
+      wu32(p,8+i*8,runs[i].count);
+      pv.setInt32(12+i*8,runs[i].offset,false);
+    }
+    return writeBox('ctts',p);
+  }
+
+function buildStss(kfs){
+    /* kfs = 0-based indices of keyframes in the NEW sample list */
+    const p=new Uint8Array(8+kfs.length*4);
+    wu32(p,0,0);wu32(p,4,kfs.length);
+    for(let i=0;i<kfs.length;i++)wu32(p,8+i*4,kfs[i]+1);
+    return writeBox('stss',p);
+  }
+
+function buildStsz(sza){
+    const p=new Uint8Array(12+sza.length*4);
+    wu32(p,0,0);wu32(p,4,0);wu32(p,8,sza.length);
+    for(let i=0;i<sza.length;i++)wu32(p,12+i*4,sza[i]);
+    return writeBox('stsz',p);
+  }
+
+function buildStsc(){
+    /* one sample per chunk (simplest valid layout) */
+    const p=new Uint8Array(20);
+    wu32(p,0,0);wu32(p,4,1);wu32(p,8,1);wu32(p,12,1);wu32(p,16,1);
+    return writeBox('stsc',p);
+  }
+
+function buildElst(entries, movieTScale) {
+    // entries: [{segDurSec, mediaTimeTicks (-1=empty or ticks in track tScale), mediaRate=1}]
+    // version 0, all durations in movie timescale, mediaTime in track timescale
+    const n = entries.length;
+    const p = new Uint8Array(8 + n * 12); // ver+flags(4) + count(4) + n*12
+    wu32(p, 0, 0); // version=0, flags=0
+    wu32(p, 4, n);
+    for (let i=0; i<n; i++) {
+      wu32(p, 8 + i*12,     entries[i].segDur);    // segment_duration (movie tScale ticks)
+      wu32(p, 8 + i*12 + 4, entries[i].mediaTime); // media_time (0xFFFFFFFF = empty)
+      wu32(p, 8 + i*12 + 8, 0x00010000);           // media_rate = 1.0
+    }
+    return writeBox('edts', writeBox('elst', p));
+  }
+
+function buildStco(offs){
+    const p=new Uint8Array(8+offs.length*4);
+    wu32(p,0,0);wu32(p,4,offs.length);
+    for(let i=0;i<offs.length;i++)wu32(p,8+i*4,offs[i]);
+    return writeBox('stco',p);
+  }
+
+function readChunk(start, end) {
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        const buf = await new Promise((res, rej) => {
+          const r = new FileReader();
+          r.onload = ev => {
+            const ab = ev.target.result;
+            if (!ab || ab.byteLength === 0) rej(new Error('empty'));
+            else res(ab);
+          };
+          r.onerror = () => rej(new Error('fr'));
+          r.readAsArrayBuffer(currentFile.slice(start, end));
+        });
+        return new Uint8Array(buf);
+      } catch(_) {
+        if (attempt === 2) throw new Error('讀取失敗 @ ' + start);
+        await new Promise(r => setTimeout(r, 150 * (attempt + 1)));
+      }
+    }
+  }
+
 async function trimMp4(file, startSec, endSec, onProgress) {
   const fileSize = file.size;
 
@@ -1783,77 +1885,20 @@ async function trimMp4(file, startSec, endSec, onProgress) {
   }
 
   /* ── box builders ── */
-  function buildStts(deltas){
-    /* deltas = array of per-sample delta values (numbers) */
-    const runs=[];
-    for(let i=0;i<deltas.length;){
-      const d=deltas[i]; let c=1;
-      while(i+c<deltas.length&&deltas[i+c]===d)c++;
-      runs.push({count:c,delta:d}); i+=c;
-    }
-    const p=new Uint8Array(8+runs.length*8);
-    wu32(p,0,0);wu32(p,4,runs.length);
-    for(let i=0;i<runs.length;i++){wu32(p,8+i*8,runs[i].count);wu32(p,12+i*8,runs[i].delta);}
-    return writeBox('stts',p);
-  }
-  function buildCtts(ctsArr){
-    /* ctsArr = array of per-sample CTS offset values (signed int32) */
-    const runs=[];
-    for(let i=0;i<ctsArr.length;){
-      const d=ctsArr[i]; let c=1;
-      while(i+c<ctsArr.length&&ctsArr[i+c]===d)c++;
-      runs.push({count:c,offset:d}); i+=c;
-    }
-    /* version=1 for signed offsets (required for negative CTS on newer iPhone) */
-    const p=new Uint8Array(8+runs.length*8);
-    p[0]=1; // version=1
-    wu32(p,4,runs.length);
-    const pv=new DataView(p.buffer);
-    for(let i=0;i<runs.length;i++){
-      wu32(p,8+i*8,runs[i].count);
-      pv.setInt32(12+i*8,runs[i].offset,false);
-    }
-    return writeBox('ctts',p);
-  }
-  function buildStss(kfs){
-    /* kfs = 0-based indices of keyframes in the NEW sample list */
-    const p=new Uint8Array(8+kfs.length*4);
-    wu32(p,0,0);wu32(p,4,kfs.length);
-    for(let i=0;i<kfs.length;i++)wu32(p,8+i*4,kfs[i]+1);
-    return writeBox('stss',p);
-  }
-  function buildStsz(sza){
-    const p=new Uint8Array(12+sza.length*4);
-    wu32(p,0,0);wu32(p,4,0);wu32(p,8,sza.length);
-    for(let i=0;i<sza.length;i++)wu32(p,12+i*4,sza[i]);
-    return writeBox('stsz',p);
-  }
-  function buildStsc(){
-    /* one sample per chunk (simplest valid layout) */
-    const p=new Uint8Array(20);
-    wu32(p,0,0);wu32(p,4,1);wu32(p,8,1);wu32(p,12,1);wu32(p,16,1);
-    return writeBox('stsc',p);
-  }
-  function buildElst(entries, movieTScale) {
-    // entries: [{segDurSec, mediaTimeTicks (-1=empty or ticks in track tScale), mediaRate=1}]
-    // version 0, all durations in movie timescale, mediaTime in track timescale
-    const n = entries.length;
-    const p = new Uint8Array(8 + n * 12); // ver+flags(4) + count(4) + n*12
-    wu32(p, 0, 0); // version=0, flags=0
-    wu32(p, 4, n);
-    for (let i=0; i<n; i++) {
-      wu32(p, 8 + i*12,     entries[i].segDur);    // segment_duration (movie tScale ticks)
-      wu32(p, 8 + i*12 + 4, entries[i].mediaTime); // media_time (0xFFFFFFFF = empty)
-      wu32(p, 8 + i*12 + 8, 0x00010000);           // media_rate = 1.0
-    }
-    return writeBox('edts', writeBox('elst', p));
-  }
-  function buildStco(offs){
-    const p=new Uint8Array(8+offs.length*4);
-    wu32(p,0,0);wu32(p,4,offs.length);
-    for(let i=0;i<offs.length;i++)wu32(p,8+i*4,offs[i]);
-    return writeBox('stco',p);
-  }
+  
+
+  
+
+  
+
+  
+
+  
+
+  
+
+  
+
 
   /* ── rebuild each trak ── */
   const newTrakBoxes=[];
@@ -2085,60 +2130,45 @@ document.getElementById('loop-export').addEventListener('click', async e => {
 
   const ext      = currentFile.name.split('.').pop().toLowerCase();
   const base     = currentFile.name.replace(/\.[^.]+$/, '') || 'clip';
-  const ss       = loopIn.toFixed(3);
   const mimeType = ext === 'mov' ? 'video/quicktime' : 'video/mp4';
-  const filename = `${base}_clip_${ss.replace('.','_')}.${ext}`;
 
-  /* readChunk: read a slice of currentFile with retry.
-     Safari iOS FileReader can fail on large or misaligned reads — retry up to 3× */
-  async function readChunk(start, end) {
-    for (let attempt = 0; attempt < 3; attempt++) {
-      try {
-        const buf = await new Promise((res, rej) => {
-          const r = new FileReader();
-          r.onload = ev => {
-            const ab = ev.target.result;
-            if (!ab || ab.byteLength === 0) rej(new Error('empty'));
-            else res(ab);
-          };
-          r.onerror = () => rej(new Error('fr'));
-          r.readAsArrayBuffer(currentFile.slice(start, end));
-        });
-        return new Uint8Array(buf);
-      } catch(_) {
-        if (attempt === 2) throw new Error('讀取失敗 @ ' + start);
-        await new Promise(r => setTimeout(r, 150 * (attempt + 1)));
-      }
-    }
+  /* readChunk helper (same as before) */
+  async 
+
+
+  /* downloadParts: assemble parts array into a Blob and trigger download */
+  async function downloadParts(parts, filename) {
+    const blob = new Blob(parts, { type: mimeType });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    a.href = url; a.download = filename;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 30000);
   }
 
-  try {
+  /* processTrimSegment: trim [segIn, segOut] and download as filename */
+  async function processTrimSegment(segIn, segOut, filename, partLabel, totalParts, baseProgress, progressRange) {
+    if (exportCancelled) throw new Error('cancelled');
+    exportStatus.textContent = `${partLabel} 分析中…`;
+    exportProgressF.style.width = (baseProgress) + '%';
+
     if (['mp4','mov','m4v'].includes(ext)) {
-      const result = await trimMp4(currentFile, loopIn, loopOut, (ratio, msg) => {
+      const result = await trimMp4(currentFile, segIn, segOut, (ratio, msg) => {
         if (exportCancelled) throw new Error('cancelled');
-        exportProgressF.style.width = Math.round(ratio * 100) + '%';
-        exportStatus.textContent = msg;
+        exportProgressF.style.width = Math.round(baseProgress + progressRange * 0.68 * ratio) + '%';
+        exportStatus.textContent = `${partLabel} ${msg}`;
       });
-      if (exportCancelled) { exportOverlay.classList.remove('show'); return; }
+      if (exportCancelled) throw new Error('cancelled');
 
       const { ftypBox, newMoovBox, mdatHeader, orderedSamples } = result;
-
-      // Read orderedSamples in EXACT output order (track-separated: all video → all audio)
-      // DO NOT merge by file position — source file is interleaved but output must be sequential
-      const totalBytes = orderedSamples.reduce((s, r) => s + r.size, 0);
       const parts = [ftypBox, newMoovBox, mdatHeader];
       let readBytes = 0;
-      const total = orderedSamples.length;
+      const totalBytes = orderedSamples.reduce((s, r) => s + r.size, 0);
 
-      exportProgressF.style.width = '68%';
-      exportStatus.textContent = '讀取資料…';
-
-      // Batch adjacent samples (consecutive in both output AND source file)
-      // to reduce FileReader calls without breaking output order
+      // Batch adjacent samples
       const batches = [];
       for (const s of orderedSamples) {
         const last = batches[batches.length - 1];
-        // Only merge if this sample immediately follows the previous in the source file
         if (last && last.srcEnd === s.fileStart) {
           last.srcEnd = s.fileStart + s.size;
           last.outSize += s.size;
@@ -2147,58 +2177,83 @@ document.getElementById('loop-export').addEventListener('click', async e => {
         }
       }
 
+      const readBase = baseProgress + Math.round(progressRange * 0.68);
+      const readRange = Math.round(progressRange * 0.28);
       for (const batch of batches) {
-        if (exportCancelled) { exportOverlay.classList.remove('show'); return; }
-        // Read this batch in 512KB pieces to stay under iOS FileReader limit
+        if (exportCancelled) throw new Error('cancelled');
         const PIECE = 512 * 1024;
         let pos = batch.srcStart;
         while (pos < batch.srcEnd) {
-          if (exportCancelled) { exportOverlay.classList.remove('show'); return; }
+          if (exportCancelled) throw new Error('cancelled');
           const chunkEnd = Math.min(pos + PIECE, batch.srcEnd);
           const chunk = await readChunk(pos, chunkEnd);
           parts.push(chunk);
           readBytes += chunkEnd - pos;
           pos = chunkEnd;
-          exportProgressF.style.width = Math.round(68 + 28 * readBytes / totalBytes) + '%';
-          exportStatus.textContent = `讀取 ${Math.round(100 * readBytes / totalBytes)}%…`;
+          exportProgressF.style.width = Math.round(readBase + readRange * readBytes / totalBytes) + '%';
+          exportStatus.textContent = `${partLabel} 讀取 ${Math.round(100 * readBytes / totalBytes)}%…`;
           await new Promise(r => setTimeout(r, 0));
         }
       }
 
-      exportProgressF.style.width = '98%';
-      exportStatus.textContent = '下載中…';
+      exportProgressF.style.width = Math.round(baseProgress + progressRange * 0.98) + '%';
+      exportStatus.textContent = `${partLabel} 下載中…`;
+      await downloadParts(parts, filename);
 
-      // Build Blob from parts — Safari stores refs, not copies
-      const blob = new Blob(parts, { type: mimeType });
-      const url  = URL.createObjectURL(blob);
-      const a    = document.createElement('a');
+    } else {
+      // MediaRecorder fallback
+      exportStatus.textContent = `${partLabel} 即時錄製模式…`;
+      exportProgressF.style.width = (baseProgress + 5) + '%';
+      const { blob, ext: outExt } = await trimByMediaRecorder(segIn, segOut, (ratio, msg) => {
+        exportProgressF.style.width = Math.round(baseProgress + progressRange * ratio) + '%';
+        exportStatus.textContent = `${partLabel} ${msg}`;
+      });
+      if (exportCancelled) throw new Error('cancelled');
+      const url = URL.createObjectURL(blob);
+      const a   = document.createElement('a');
       a.href = url; a.download = filename;
       document.body.appendChild(a); a.click(); document.body.removeChild(a);
       setTimeout(() => URL.revokeObjectURL(url), 30000);
-
-      exportProgressF.style.width = '100%';
-      exportStatus.textContent = '完成！';
-      setTimeout(() => exportOverlay.classList.remove('show'), 1400);
-      showToast('剪輯完成');
-
-    } else {
-      exportStatus.textContent = '即時錄製模式…';
-      exportProgressF.style.width = '5%';
-      const { blob, ext: outExt } = await trimByMediaRecorder(loopIn, loopOut, (ratio, msg) => {
-        exportProgressF.style.width = Math.round(ratio * 100) + '%';
-        exportStatus.textContent = msg;
-      });
-      if (exportCancelled) { exportOverlay.classList.remove('show'); return; }
-      const url = URL.createObjectURL(blob);
-      const a   = document.createElement('a');
-      a.href = url; a.download = `${base}_clip_${ss.replace('.','_')}.${outExt}`;
-      document.body.appendChild(a); a.click(); document.body.removeChild(a);
-      setTimeout(() => URL.revokeObjectURL(url), 30000);
-      exportProgressF.style.width = '100%';
-      exportStatus.textContent = '完成！';
-      setTimeout(() => exportOverlay.classList.remove('show'), 1400);
-      showToast('剪輯完成');
     }
+  }
+
+  try {
+    const clipDuration = loopOut - loopIn;
+    const LIMIT = 300 * 1024 * 1024; // 300 MB
+
+    // Estimate output size by bitrate (file size / total duration)
+    const estimatedSize = (clipDuration / duration) * currentFile.size;
+
+    if (estimatedSize > LIMIT) {
+      // Calculate how many parts needed
+      const nParts = Math.ceil(estimatedSize / LIMIT);
+      const segDur  = clipDuration / nParts;
+      showToast(`預估 ${(estimatedSize/1024/1024).toFixed(0)}MB，將分割為 ${nParts} 個檔案`);
+      await new Promise(r => setTimeout(r, 800)); // let toast show
+
+      for (let i = 0; i < nParts; i++) {
+        if (exportCancelled) { exportOverlay.classList.remove('show'); return; }
+        const segIn  = loopIn  + i * segDur;
+        const segOut = Math.min(loopIn + (i + 1) * segDur, loopOut);
+        const suffix = String(i + 1).padStart(2, '0');
+        const filename = `${base}_clip_part${suffix}.${ext}`;
+        const partLabel = `(${i+1}/${nParts})`;
+        const baseProgress = Math.round(100 * i / nParts);
+        const progressRange = Math.round(100 / nParts);
+        await processTrimSegment(segIn, segOut, filename, partLabel, nParts, baseProgress, progressRange);
+      }
+    } else {
+      // Single file (original flow)
+      const ss = loopIn.toFixed(3);
+      const filename = `${base}_clip_${ss.replace('.','_')}.${ext}`;
+      await processTrimSegment(loopIn, loopOut, filename, '', 1, 0, 100);
+    }
+
+    exportProgressF.style.width = '100%';
+    exportStatus.textContent = '完成！';
+    setTimeout(() => exportOverlay.classList.remove('show'), 1400);
+    showToast('剪輯完成');
+
   } catch(err) {
     exportOverlay.classList.remove('show');
     if (err.message !== 'cancelled') showToast('剪輯失敗：' + (err.message || err));
