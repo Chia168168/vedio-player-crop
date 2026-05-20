@@ -1474,7 +1474,49 @@ let exportCancelled = false;
    No WASM. Supports any file size.
    ═══════════════════════════════════════════════ */
 
-/* helpers hoisted for Safari scope */
+/* ── top-level helpers (hoisted for Safari scope) ── */
+
+function ru32(v, o) { return v.getUint32(o, false); }
+
+function ri32(v, o) { return v.getInt32(o, false); }
+
+function ru64(v, o) { return ru32(v,o) * 0x100000000 + ru32(v,o+4); }
+
+function r4cc(v, o) { let s=''; for(let i=0;i<4;i++) s+=String.fromCharCode(v.getUint8(o+i)); return s; }
+
+function wu32(a, o, v) { a[o]=(v>>>24)&0xff; a[o+1]=(v>>>16)&0xff; a[o+2]=(v>>>8)&0xff; a[o+3]=v&0xff; }
+
+function writeBox(name, payload) {
+    const sz = 8 + payload.byteLength;
+    const out = new Uint8Array(sz);
+    wu32(out,0,sz);
+    for(let i=0;i<4;i++) out[4+i]=name.charCodeAt(i);
+    out.set(payload,8);
+    return out;
+  }
+
+function concatU8(...arrays) {
+    const total = arrays.reduce((s,a)=>s+a.byteLength,0);
+    const out = new Uint8Array(total); let off=0;
+    for(const a of arrays){out.set(a,off);off+=a.byteLength;}
+    return out;
+  }
+
+function iterBoxes(view, start, end, cb) {
+    let o=start;
+    while(o+8<=end){
+      let size=ru32(view,o); const name=r4cc(view,o+4); let hs=8;
+      if(size===1){if(o+16>end)break;size=Number(ru64(view,o+8));hs=16;}
+      if(size<hs||o+size>end+1)break;
+      cb(name,o,size,hs); o+=size;
+    }
+  }
+
+function findBox(view, start, end, target) {
+    let found=null;
+    iterBoxes(view,start,end,(name,o,size,hs)=>{if(name===target)found={off:o,size,hs};});
+    return found;
+  }
 
 function buildStts(deltas){
     /* deltas = array of per-sample delta values (numbers) */
@@ -1609,39 +1651,24 @@ async function trimMp4(file, startSec, endSec, onProgress) {
     for (const p of parts) { out.set(p, off); off += p.byteLength; }
     return out.buffer;
   }
-  function ru32(v, o) { return v.getUint32(o, false); }
-  function ri32(v, o) { return v.getInt32(o, false); }
-  function ru64(v, o) { return ru32(v,o) * 0x100000000 + ru32(v,o+4); }
-  function r4cc(v, o) { let s=''; for(let i=0;i<4;i++) s+=String.fromCharCode(v.getUint8(o+i)); return s; }
-  function wu32(a, o, v) { a[o]=(v>>>24)&0xff; a[o+1]=(v>>>16)&0xff; a[o+2]=(v>>>8)&0xff; a[o+3]=v&0xff; }
-  function writeBox(name, payload) {
-    const sz = 8 + payload.byteLength;
-    const out = new Uint8Array(sz);
-    wu32(out,0,sz);
-    for(let i=0;i<4;i++) out[4+i]=name.charCodeAt(i);
-    out.set(payload,8);
-    return out;
-  }
-  function concatU8(...arrays) {
-    const total = arrays.reduce((s,a)=>s+a.byteLength,0);
-    const out = new Uint8Array(total); let off=0;
-    for(const a of arrays){out.set(a,off);off+=a.byteLength;}
-    return out;
-  }
-  function iterBoxes(view, start, end, cb) {
-    let o=start;
-    while(o+8<=end){
-      let size=ru32(view,o); const name=r4cc(view,o+4); let hs=8;
-      if(size===1){if(o+16>end)break;size=Number(ru64(view,o+8));hs=16;}
-      if(size<hs||o+size>end+1)break;
-      cb(name,o,size,hs); o+=size;
-    }
-  }
-  function findBox(view, start, end, target) {
-    let found=null;
-    iterBoxes(view,start,end,(name,o,size,hs)=>{if(name===target)found={off:o,size,hs};});
-    return found;
-  }
+  
+
+  
+
+  
+
+  
+
+  
+
+  
+
+  
+
+  
+
+  
+
 
   /* ── locate moov by scanning top-level boxes ── */
   onProgress(0.05, '掃描 moov…');
@@ -2132,6 +2159,27 @@ document.getElementById('loop-export').addEventListener('click', async e => {
   const base     = currentFile.name.replace(/\.[^.]+$/, '') || 'clip';
   const mimeType = ext === 'mov' ? 'video/quicktime' : 'video/mp4';
 
+  /* readChunk helper (same as before) */
+  async function readChunk(start, end) {
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        const buf = await new Promise((res, rej) => {
+          const r = new FileReader();
+          r.onload = ev => {
+            const ab = ev.target.result;
+            if (!ab || ab.byteLength === 0) rej(new Error('empty'));
+            else res(ab);
+          };
+          r.onerror = () => rej(new Error('fr'));
+          r.readAsArrayBuffer(currentFile.slice(start, end));
+        });
+        return new Uint8Array(buf);
+      } catch(_) {
+        if (attempt === 2) throw new Error('讀取失敗 @ ' + start);
+        await new Promise(r => setTimeout(r, 150 * (attempt + 1)));
+      }
+    }
+  }
 
   /* downloadParts: assemble parts array into a Blob and trigger download */
   async function downloadParts(parts, filename) {
