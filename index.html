@@ -839,8 +839,13 @@ document.body.appendChild(changeInput);
 fileInput.addEventListener('change', e => {
   const f = e.target.files && e.target.files[0];
   if (!f) return;
-  fileInput.value = '';
-  loadVideoFile(f);
+  // On iOS Safari, the page layout resets after the file picker closes.
+  // We wait one tick so the browser finishes its reset, then override it.
+  setTimeout(() => {
+    uploadScreen.style.cssText = 'display:none!important';
+    playerScreen.style.cssText = 'display:block!important;position:fixed;inset:0;background:#000';
+    loadVideoFile(f);
+  }, 50);
 });
 changeInput.addEventListener('change', e => {
   const f = e.target.files && e.target.files[0];
@@ -1508,7 +1513,7 @@ let exportCancelled = false;
   }
 
 
-/* ── helpers hoisted for Safari scope ── */
+/* helpers hoisted for Safari scope */
 
 function buildStts(deltas){
     /* deltas = array of per-sample delta values (numbers) */
@@ -2563,24 +2568,6 @@ document.getElementById('loop-convert').addEventListener('click', async e => {
   }
 });
 
-
-
-/* iOS file-picker: temporarily lift position:fixed to prevent page reset */
-(function() {
-  var fi = document.getElementById('file-input');
-  if (!fi) return;
-  fi.addEventListener('click', function() {
-    document.documentElement.classList.add('picking');
-  });
-  function removePicking() {
-    setTimeout(function() {
-      document.documentElement.classList.remove('picking');
-    }, 500);
-  }
-  fi.addEventListener('change', removePicking);
-  fi.addEventListener('cancel', removePicking);
-  window.addEventListener('focus', removePicking);
-})();
 </script>
 </body>
 </html>
