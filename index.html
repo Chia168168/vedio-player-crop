@@ -839,13 +839,13 @@ document.body.appendChild(changeInput);
 fileInput.addEventListener('change', e => {
   const f = e.target.files && e.target.files[0];
   if (!f) return;
-  // On iOS Safari, the page layout resets after the file picker closes.
-  // We wait one tick so the browser finishes its reset, then override it.
-  setTimeout(() => {
-    uploadScreen.style.cssText = 'display:none!important';
-    playerScreen.style.cssText = 'display:block!important;position:fixed;inset:0;background:#000';
-    loadVideoFile(f);
-  }, 50);
+  uploadScreen.classList.add('hidden');
+  playerScreen.classList.add('visible');
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      loadVideoFile(f);
+    });
+  });
 });
 changeInput.addEventListener('change', e => {
   const f = e.target.files && e.target.files[0];
@@ -884,8 +884,8 @@ function loadVideoFile(file) {
     showToast('無法開啟檔案'); return;
   }
 
-  uploadScreen.style.display = 'none';
-  playerScreen.style.display = 'block';
+  uploadScreen.classList.add('hidden');
+  playerScreen.classList.add('visible');
   showPanel();
   requestWakeLock();
 
