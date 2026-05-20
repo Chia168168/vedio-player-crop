@@ -1704,13 +1704,12 @@ async function trimMp4(file, startSec, endSec, onProgress) {
     const tS=Math.round(actualStart*track.tScale);
     const tE=Math.round(actualEnd*track.tScale);
     let first=-1,last=-1;
-    // first: last sample that starts AT or BEFORE tS (covers the start boundary)
+    // first: first sample at or after tS — same boundary for all tracks keeps A/V in sync
     for(let i=0;i<track.sampleTimes.length;i++){
-      if(track.sampleTimes[i]<=tS) first=i;
-      else break;
+      if(track.sampleTimes[i]>=tS){ first=i; break; }
     }
-    if(first===-1) first=0; // fallback: use first sample
-    // last: last sample that starts BEFORE tE
+    if(first===-1) first=track.sampleTimes.length-1; // fallback: last sample
+    // last: last sample that starts before tE
     for(let i=track.sampleTimes.length-1;i>=0;i--){
       if(track.sampleTimes[i]<tE){ last=i; break; }
     }
