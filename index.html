@@ -3,7 +3,6 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<!-- apple-mobile-web-app-capable removed: causes file-input reload on iOS -->
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Frame Player">
 <meta name="theme-color" content="#0a0a0c">
@@ -629,7 +628,6 @@ if ('serviceWorker' in navigator) {
 
 <script>
 const video             = document.getElementById('video');
-const fileInput         = document.getElementById('file-input');
 const uploadScreen      = document.getElementById('upload-screen');
 const playerScreen      = document.getElementById('player-screen');
 const playBtn           = document.getElementById('play-btn');
@@ -830,25 +828,9 @@ document.getElementById('mini-save').addEventListener('click', e => {
   }, { passive: true });
 })();
 
-const changeInput = document.createElement('input');
-changeInput.type = 'file';
-changeInput.accept = 'video/*';
-changeInput.style.display = 'none';
-document.body.appendChild(changeInput);
-
-fileInput.addEventListener('change', e => {
-  const f = e.target.files && e.target.files[0];
-  if (!f) return;
-  loadVideoFile(f);
-});
-changeInput.addEventListener('change', e => {
-  const f = e.target.files && e.target.files[0];
-  if (!f) return;
-  changeInput.value = '';
-  loadVideoFile(f);
-});
 document.getElementById('change-video-btn').addEventListener('click', e => {
-  e.stopPropagation(); changeInput.click();
+  e.stopPropagation();
+  openFilePicker(loadVideoFile);
 });
 
 function loadVideoFile(file) {
@@ -2564,12 +2546,31 @@ document.getElementById('loop-convert').addEventListener('click', async e => {
 
 
 
-/* upload zone tap → open file picker */
-document.querySelector('.upload-zone').addEventListener('click', function(e) {
+/* iOS fix: always create a fresh input to avoid page-reload bug */
+function openFilePicker(onFile) {
+  const inp = document.createElement('input');
+  inp.type = 'file';
+  inp.accept = 'video/*';
+  inp.style.cssText = 'position:fixed;left:-200vw;top:0;opacity:0;pointer-events:none;';
+  document.body.appendChild(inp);
+  inp.addEventListener('change', function() {
+    const f = inp.files && inp.files[0];
+    document.body.removeChild(inp);
+    if (f) onFile(f);
+  });
+  inp.addEventListener('cancel', function() {
+    document.body.removeChild(inp);
+  });
+  inp.click();
+}
+
+
+/* upload-zone tap → open file picker */
+document.getElementById('upload-zone').addEventListener('click', function(e) {
+  e.preventDefault();
   e.stopPropagation();
-  document.getElementById('file-input').click();
+  openFilePicker(loadVideoFile);
 });
 </script>
-<input type="file" id="file-input" accept="video/*" style="position:fixed;left:-200vw;top:0;opacity:0;pointer-events:none;">
 </body>
 </html>
