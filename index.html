@@ -1507,6 +1507,296 @@ let exportCancelled = false;
     }
   }
 
+
+
+/* ── box-builder helpers (top-level for Safari scope) ── */
+
+function buildStts(deltas){
+    /* deltas = array of per-sample delta values (numbers) */
+    const runs=[];
+    for(let i=0;i<deltas.length;){
+      const d=deltas[i]; let c=1;
+      while(i+c<deltas.length&&deltas[i+c]===d)c++;
+      runs.push({count:c,delta:d}); i+=c;
+    }
+    const p=new Uint8Array(8+runs.length*8);
+    wu32(p,0,0);wu32(p,4,runs.length);
+    for(let i=0;i<runs.length;i++){wu32(p,8+i*8,runs[i].count);wu32(p,12+i*8,runs[i].delta);}
+    return writeBox('stts',p);
+  }
+
+function buildCtts(ctsArr){
+    /* ctsArr = array of per-sample CTS offset values (signed int32) */
+    const runs=[];
+    for(let i=0;i<ctsArr.length;){
+      const d=ctsArr[i]; let c=1;
+      while(i+c<ctsArr.length&&ctsArr[i+c]===d)c++;
+      runs.push({count:c,offset:d}); i+=c;
+    }
+    /* version=1 for signed offsets (required for negative CTS on newer iPhone) */
+    const p=new Uint8Array(8+runs.length*8);
+    p[0]=1; // version=1
+    wu32(p,4,runs.length);
+    const pv=new DataView(p.buffer);
+    for(let i=0;i<runs.length;i++){
+      wu32(p,8+i*8,runs[i].count);
+      pv.setInt32(12+i*8,runs[i].offset,false);
+    }
+    return writeBox('ctts',p);
+  }
+
+function buildStss(kfs){
+    /* kfs = 0-based indices of keyframes in the NEW sample list */
+    const p=new Uint8Array(8+kfs.length*4);
+    wu32(p,0,0);wu32(p,4,kfs.length);
+    for(let i=0;i<kfs.length;i++)wu32(p,8+i*4,kfs[i]+1);
+    return writeBox('stss',p);
+  }
+
+function buildStsz(sza){
+    const p=new Uint8Array(12+sza.length*4);
+    wu32(p,0,0);wu32(p,4,0);wu32(p,8,sza.length);
+    for(let i=0;i<sza.length;i++)wu32(p,12+i*4,sza[i]);
+    return writeBox('stsz',p);
+  }
+
+function buildStsc(){
+    /* one sample per chunk (simplest valid layout) */
+    const p=new Uint8Array(20);
+    wu32(p,0,0);wu32(p,4,1);wu32(p,8,1);wu32(p,12,1);wu32(p,16,1);
+    return writeBox('stsc',p);
+  }
+
+function buildElst(entries, movieTScale) {
+    // entries: [{segDurSec, mediaTimeTicks (-1=empty or ticks in track tScale), mediaRate=1}]
+    // version 0, all durations in movie timescale, mediaTime in track timescale
+    const n = entries.length;
+    const p = new Uint8Array(8 + n * 12); // ver+flags(4) + count(4) + n*12
+    wu32(p, 0, 0); // version=0, flags=0
+    wu32(p, 4, n);
+    for (let i=0; i<n; i++) {
+      wu32(p, 8 + i*12,     entries[i].segDur);    // segment_duration (movie tScale ticks)
+      wu32(p, 8 + i*12 + 4, entries[i].mediaTime); // media_time (0xFFFFFFFF = empty)
+      wu32(p, 8 + i*12 + 8, 0x00010000);           // media_rate = 1.0
+    }
+    return writeBox('edts', writeBox('elst', p));
+  }
+
+function buildStco(offs){
+    const p=new Uint8Array(8+offs.length*4);
+    wu32(p,0,0);wu32(p,4,offs.length);
+    for(let i=0;i<offs.length;i++)wu32(p,8+i*4,offs[i]);
+    return writeBox('stco',p);
+  }
+
+function readChunk(start, end) {
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        const buf = await new Promise((res, rej) => {
+          const r = new FileReader();
+          r.onload = ev => {
+            const ab = ev.target.result;
+            if (!ab || ab.byteLength === 0) rej(new Error('empty'));
+            else res(ab);
+          };
+          r.onerror = () => rej(new Error('fr'));
+          r.readAsArrayBuffer(currentFile.slice(start, end));
+        });
+        return new Uint8Array(buf);
+      } catch(_) {
+        if (attempt === 2) throw new Error('讀取失敗 @ ' + start);
+        await new Promise(r => setTimeout(r, 150 * (attempt + 1)));
+      }
+    }
+  }
+
+function buildSegmentHeaders(tracks, segSamples, movieTimescale, ftypBox, moovBuf) {
+  const moovView = new DataView(moovBuf);
+  const moovEnd  = moovBuf.byteLength;
+
+  // Per-track: collect this segment's samples in output order
+  const trackSamples = {};
+  for (const s of segSamples) {
+    if (!trackSamples[s.ti]) trackSamples[s.ti] = [];
+    trackSamples[s.ti].push(s);
+  }
+
+  // Rebuild stco offsets (relative to segment mdat start)
+  const newChunkOffsets = {};
+  let mdatOff = 0;
+  for (const s of segSamples) {
+    if (!newChunkOffsets[s.ti]) newChunkOffsets[s.ti] = [];
+    newChunkOffsets[s.ti].push(mdatOff);
+    mdatOff += s.size;
+  }
+  const segPayloadSize = mdatOff;
+
+  const newTrakBoxes = [];
+  for (const track of tracks) {
+    const ti = tracks.indexOf(track);
+    const tSamples = trackSamples[ti];
+    if (!tSamples || tSamples.length === 0) continue;
+
+    // Duration of this segment for this track
+    const lastDelta = tSamples.length > 1
+      ? Math.round((tSamples[tSamples.length-1].dts - tSamples[tSamples.length-2].dts) * track.tScale)
+      : (track.sttsList[0]?.delta || 1);
+    const clipDurSeg = tSamples[tSamples.length-1].dts - tSamples[0].dts
+                     + lastDelta / track.tScale;
+
+    const trakEnd = track.trakOff + track.trakSize;
+    const mdia    = findBox(moovView, track.trakOff+8, trakEnd, 'mdia');
+    const mdiaEnd = mdia.off + mdia.size;
+    const minf    = findBox(moovView, mdia.off+8, mdiaEnd, 'minf');
+    const stbl    = findBox(moovView, minf.off+8, minf.off+minf.size, 'stbl');
+    const stblEnd = stbl.off + stbl.size;
+    const tkhd    = findBox(moovView, track.trakOff+8, trakEnd, 'tkhd');
+    const mdhd    = findBox(moovView, mdia.off+8, mdiaEnd, 'mdhd');
+    const hdlr    = findBox(moovView, mdia.off+8, mdiaEnd, 'hdlr');
+
+    // stts deltas
+    const newDeltas = tSamples.map((s, i) => {
+      const next = tSamples[i+1];
+      const d = next
+        ? Math.round((next.dts - s.dts) * track.tScale)
+        : lastDelta;
+      return Math.max(1, d);
+    });
+
+    // Find full-track index of first sample in this segment
+    const tSfirst = Math.round(tSamples[0].dts * track.tScale);
+    let fullFirst = 0;
+    for (let i = 0; i < track.sampleTimes.length; i++) {
+      if (track.sampleTimes[i] >= tSfirst) { fullFirst = i; break; }
+    }
+
+    // ctts
+    let newCttsBox = null;
+    if (track.ctsList) {
+      const newCts = tSamples.map((_, i) => track.sampleCts[fullFirst + i] || 0);
+      if (newCts.some(v => v !== 0)) newCttsBox = buildCtts(newCts);
+    }
+
+    // stss keyframes
+    let newStss = null;
+    if (track.keyframes) {
+      const kfSet = new Set(track.keyframes);
+      const nkf = tSamples.map((_, i) => kfSet.has(fullFirst + i) ? i : -1).filter(i => i >= 0);
+      if (nkf.length === 0) nkf.push(0);
+      newStss = buildStss(nkf);
+    }
+
+    // stbl
+    const stblKids = [];
+    iterBoxes(moovView, stbl.off+8, stblEnd, (name, o, size) => {
+      if (name === 'stsd') stblKids.push(new Uint8Array(moovBuf.slice(o, o+size)));
+    });
+    const newStblBox = writeBox('stbl', concatU8(
+      ...stblKids,
+      buildStts(newDeltas),
+      ...(newCttsBox ? [newCttsBox] : []),
+      ...(newStss    ? [newStss]    : []),
+      buildStsz(tSamples.map(s => s.size)),
+      buildStsc(),
+      buildStco(newChunkOffsets[ti])
+    ));
+
+    // minf
+    const minfKids = [];
+    iterBoxes(moovView, minf.off+8, minf.off+minf.size, (name, o, size) => {
+      if (name !== 'stbl') minfKids.push(new Uint8Array(moovBuf.slice(o, o+size)));
+    });
+    const newMinfBox = writeBox('minf', concatU8(...minfKids, newStblBox));
+
+    // mdhd — patch duration
+    const mdhdBuf = new Uint8Array(moovBuf.slice(mdhd.off, mdhd.off+mdhd.size));
+    const mdhdV = mdhdBuf[8];
+    wu32(mdhdBuf, mdhdV === 1 ? 28 : 24, Math.round(clipDurSeg * track.tScale));
+    wu32(mdhdBuf, 0, mdhdBuf.byteLength);
+
+    const hdlrBox = new Uint8Array(moovBuf.slice(hdlr.off, hdlr.off+hdlr.size));
+    const mdiaKids = [];
+    iterBoxes(moovView, mdia.off+8, mdiaEnd, (name, o, size) => {
+      if (!['mdhd','hdlr','minf'].includes(name))
+        mdiaKids.push(new Uint8Array(moovBuf.slice(o, o+size)));
+    });
+    const newMdiaBox = writeBox('mdia', concatU8(mdhdBuf, hdlrBox, ...mdiaKids, newMinfBox));
+
+    // tkhd — patch duration
+    const tkhdBuf = new Uint8Array(moovBuf.slice(tkhd.off, tkhd.off+tkhd.size));
+    const tkhdV = tkhdBuf[8];
+    wu32(tkhdBuf, tkhdV === 1 ? 36 : 28, Math.round(clipDurSeg * movieTimescale));
+    wu32(tkhdBuf, 0, tkhdBuf.byteLength);
+
+    // edts rebuild
+    let newEdtsBox = null;
+    if (track.elstEntries && track.elstEntries.length > 0) {
+      const clipMovieTicks = Math.round(clipDurSeg * movieTimescale);
+      const newEntries = [];
+      if (track.elstEntries.length === 1) {
+        newEntries.push({ segDur: clipMovieTicks, mediaTime: track.elstEntries[0].mediaTime });
+      } else {
+        let remaining = clipMovieTicks;
+        for (const e of track.elstEntries) {
+          if (e.mediaTime === 0xFFFFFFFF) {
+            newEntries.push({ segDur: e.segDur, mediaTime: 0xFFFFFFFF });
+            remaining -= e.segDur;
+          } else {
+            newEntries.push({ segDur: Math.max(remaining, 1), mediaTime: e.mediaTime });
+          }
+        }
+      }
+      newEdtsBox = buildElst(newEntries, movieTimescale);
+    }
+
+    const trakKids = [];
+    iterBoxes(moovView, track.trakOff+8, trakEnd, (name, o, size) => {
+      if (!['tkhd','mdia','edts'].includes(name))
+        trakKids.push(new Uint8Array(moovBuf.slice(o, o+size)));
+    });
+    newTrakBoxes.push(writeBox('trak',
+      concatU8(tkhdBuf, ...trakKids, ...(newEdtsBox ? [newEdtsBox] : []), newMdiaBox)));
+  }
+
+  // mvhd — patch duration
+  const mvhd   = findBox(moovView, 8, moovEnd, 'mvhd');
+  const mvhdBuf = new Uint8Array(moovBuf.slice(mvhd.off, mvhd.off+mvhd.size));
+  const mvhdV  = mvhdBuf[8];
+  const segDurSec = segSamples[segSamples.length-1].dts - segSamples[0].dts;
+  wu32(mvhdBuf, mvhdV === 1 ? 28 : 20, Math.round(segDurSec * movieTimescale));
+  wu32(mvhdBuf, 0, mvhdBuf.byteLength);
+
+  const moovKids = [];
+  iterBoxes(moovView, 8, moovEnd, (name, o, size) => {
+    if (!['mvhd','trak','udta'].includes(name))
+      moovKids.push(new Uint8Array(moovBuf.slice(o, o+size)));
+  });
+  const segMoovBox = writeBox('moov', concatU8(mvhdBuf, ...moovKids, ...newTrakBoxes));
+
+  // Patch stco absolute offsets
+  const segMdatAbsStart = ftypBox.byteLength + segMoovBox.byteLength + 8;
+  const snmv = new DataView(segMoovBox.buffer, segMoovBox.byteOffset, segMoovBox.byteLength);
+  function patchSegStco(view, arr, start, end) {
+    iterBoxes(view, start, end, (name, o, size, hs) => {
+      if (name === 'stco') {
+        const b = o+hs+4; const c = ru32(view, b);
+        for (let i = 0; i < c; i++) wu32(arr, b+4+i*4, segMdatAbsStart + ru32(view, b+4+i*4));
+      } else if (['moov','trak','mdia','minf','stbl'].includes(name)) {
+        patchSegStco(view, arr, o+hs, o+size);
+      }
+    });
+  }
+  patchSegStco(snmv, segMoovBox, 8, segMoovBox.byteLength);
+
+  // mdat header
+  const segMdatHdr = new Uint8Array(8);
+  const dv = new DataView(segMdatHdr.buffer);
+  dv.setUint32(0, segPayloadSize + 8);
+  dv.setUint32(4, 0x6d646174); // 'mdat'
+
+  return { segMoovBox, segMdatHdr };
+}
+
 async function trimMp4(file, startSec, endSec, onProgress) {
   const fileSize = file.size;
 
@@ -1787,77 +2077,20 @@ async function trimMp4(file, startSec, endSec, onProgress) {
   }
 
   /* ── box builders ── */
-  function buildStts(deltas){
-    /* deltas = array of per-sample delta values (numbers) */
-    const runs=[];
-    for(let i=0;i<deltas.length;){
-      const d=deltas[i]; let c=1;
-      while(i+c<deltas.length&&deltas[i+c]===d)c++;
-      runs.push({count:c,delta:d}); i+=c;
-    }
-    const p=new Uint8Array(8+runs.length*8);
-    wu32(p,0,0);wu32(p,4,runs.length);
-    for(let i=0;i<runs.length;i++){wu32(p,8+i*8,runs[i].count);wu32(p,12+i*8,runs[i].delta);}
-    return writeBox('stts',p);
-  }
-  function buildCtts(ctsArr){
-    /* ctsArr = array of per-sample CTS offset values (signed int32) */
-    const runs=[];
-    for(let i=0;i<ctsArr.length;){
-      const d=ctsArr[i]; let c=1;
-      while(i+c<ctsArr.length&&ctsArr[i+c]===d)c++;
-      runs.push({count:c,offset:d}); i+=c;
-    }
-    /* version=1 for signed offsets (required for negative CTS on newer iPhone) */
-    const p=new Uint8Array(8+runs.length*8);
-    p[0]=1; // version=1
-    wu32(p,4,runs.length);
-    const pv=new DataView(p.buffer);
-    for(let i=0;i<runs.length;i++){
-      wu32(p,8+i*8,runs[i].count);
-      pv.setInt32(12+i*8,runs[i].offset,false);
-    }
-    return writeBox('ctts',p);
-  }
-  function buildStss(kfs){
-    /* kfs = 0-based indices of keyframes in the NEW sample list */
-    const p=new Uint8Array(8+kfs.length*4);
-    wu32(p,0,0);wu32(p,4,kfs.length);
-    for(let i=0;i<kfs.length;i++)wu32(p,8+i*4,kfs[i]+1);
-    return writeBox('stss',p);
-  }
-  function buildStsz(sza){
-    const p=new Uint8Array(12+sza.length*4);
-    wu32(p,0,0);wu32(p,4,0);wu32(p,8,sza.length);
-    for(let i=0;i<sza.length;i++)wu32(p,12+i*4,sza[i]);
-    return writeBox('stsz',p);
-  }
-  function buildStsc(){
-    /* one sample per chunk (simplest valid layout) */
-    const p=new Uint8Array(20);
-    wu32(p,0,0);wu32(p,4,1);wu32(p,8,1);wu32(p,12,1);wu32(p,16,1);
-    return writeBox('stsc',p);
-  }
-  function buildElst(entries, movieTScale) {
-    // entries: [{segDurSec, mediaTimeTicks (-1=empty or ticks in track tScale), mediaRate=1}]
-    // version 0, all durations in movie timescale, mediaTime in track timescale
-    const n = entries.length;
-    const p = new Uint8Array(8 + n * 12); // ver+flags(4) + count(4) + n*12
-    wu32(p, 0, 0); // version=0, flags=0
-    wu32(p, 4, n);
-    for (let i=0; i<n; i++) {
-      wu32(p, 8 + i*12,     entries[i].segDur);    // segment_duration (movie tScale ticks)
-      wu32(p, 8 + i*12 + 4, entries[i].mediaTime); // media_time (0xFFFFFFFF = empty)
-      wu32(p, 8 + i*12 + 8, 0x00010000);           // media_rate = 1.0
-    }
-    return writeBox('edts', writeBox('elst', p));
-  }
-  function buildStco(offs){
-    const p=new Uint8Array(8+offs.length*4);
-    wu32(p,0,0);wu32(p,4,offs.length);
-    for(let i=0;i<offs.length;i++)wu32(p,8+i*4,offs[i]);
-    return writeBox('stco',p);
-  }
+  
+
+  
+
+  
+
+  
+
+  
+
+  
+
+  
+
 
   /* ── rebuild each trak ── */
   const newTrakBoxes=[];
@@ -2072,192 +2305,8 @@ async function trimByMediaRecorder(startSec, endSec, onProgress) {
 }
 
 /* ── buildSegmentHeaders: rebuild ftyp+moov+mdat-header for a sub-range of samples ── */
-async function buildSegmentHeaders(tracks, segSamples, movieTimescale, ftypBox, moovBuf) {
-  const moovView = new DataView(moovBuf);
-  const moovEnd  = moovBuf.byteLength;
+async 
 
-  // Per-track: collect this segment's samples in output order
-  const trackSamples = {};
-  for (const s of segSamples) {
-    if (!trackSamples[s.ti]) trackSamples[s.ti] = [];
-    trackSamples[s.ti].push(s);
-  }
-
-  // Rebuild stco offsets (relative to segment mdat start)
-  const newChunkOffsets = {};
-  let mdatOff = 0;
-  for (const s of segSamples) {
-    if (!newChunkOffsets[s.ti]) newChunkOffsets[s.ti] = [];
-    newChunkOffsets[s.ti].push(mdatOff);
-    mdatOff += s.size;
-  }
-  const segPayloadSize = mdatOff;
-
-  const newTrakBoxes = [];
-  for (const track of tracks) {
-    const ti = tracks.indexOf(track);
-    const tSamples = trackSamples[ti];
-    if (!tSamples || tSamples.length === 0) continue;
-
-    // Duration of this segment for this track
-    const lastDelta = tSamples.length > 1
-      ? Math.round((tSamples[tSamples.length-1].dts - tSamples[tSamples.length-2].dts) * track.tScale)
-      : (track.sttsList[0]?.delta || 1);
-    const clipDurSeg = tSamples[tSamples.length-1].dts - tSamples[0].dts
-                     + lastDelta / track.tScale;
-
-    const trakEnd = track.trakOff + track.trakSize;
-    const mdia    = findBox(moovView, track.trakOff+8, trakEnd, 'mdia');
-    const mdiaEnd = mdia.off + mdia.size;
-    const minf    = findBox(moovView, mdia.off+8, mdiaEnd, 'minf');
-    const stbl    = findBox(moovView, minf.off+8, minf.off+minf.size, 'stbl');
-    const stblEnd = stbl.off + stbl.size;
-    const tkhd    = findBox(moovView, track.trakOff+8, trakEnd, 'tkhd');
-    const mdhd    = findBox(moovView, mdia.off+8, mdiaEnd, 'mdhd');
-    const hdlr    = findBox(moovView, mdia.off+8, mdiaEnd, 'hdlr');
-
-    // stts deltas
-    const newDeltas = tSamples.map((s, i) => {
-      const next = tSamples[i+1];
-      const d = next
-        ? Math.round((next.dts - s.dts) * track.tScale)
-        : lastDelta;
-      return Math.max(1, d);
-    });
-
-    // Find full-track index of first sample in this segment
-    const tSfirst = Math.round(tSamples[0].dts * track.tScale);
-    let fullFirst = 0;
-    for (let i = 0; i < track.sampleTimes.length; i++) {
-      if (track.sampleTimes[i] >= tSfirst) { fullFirst = i; break; }
-    }
-
-    // ctts
-    let newCttsBox = null;
-    if (track.ctsList) {
-      const newCts = tSamples.map((_, i) => track.sampleCts[fullFirst + i] || 0);
-      if (newCts.some(v => v !== 0)) newCttsBox = buildCtts(newCts);
-    }
-
-    // stss keyframes
-    let newStss = null;
-    if (track.keyframes) {
-      const kfSet = new Set(track.keyframes);
-      const nkf = tSamples.map((_, i) => kfSet.has(fullFirst + i) ? i : -1).filter(i => i >= 0);
-      if (nkf.length === 0) nkf.push(0);
-      newStss = buildStss(nkf);
-    }
-
-    // stbl
-    const stblKids = [];
-    iterBoxes(moovView, stbl.off+8, stblEnd, (name, o, size) => {
-      if (name === 'stsd') stblKids.push(new Uint8Array(moovBuf.slice(o, o+size)));
-    });
-    const newStblBox = writeBox('stbl', concatU8(
-      ...stblKids,
-      buildStts(newDeltas),
-      ...(newCttsBox ? [newCttsBox] : []),
-      ...(newStss    ? [newStss]    : []),
-      buildStsz(tSamples.map(s => s.size)),
-      buildStsc(),
-      buildStco(newChunkOffsets[ti])
-    ));
-
-    // minf
-    const minfKids = [];
-    iterBoxes(moovView, minf.off+8, minf.off+minf.size, (name, o, size) => {
-      if (name !== 'stbl') minfKids.push(new Uint8Array(moovBuf.slice(o, o+size)));
-    });
-    const newMinfBox = writeBox('minf', concatU8(...minfKids, newStblBox));
-
-    // mdhd — patch duration
-    const mdhdBuf = new Uint8Array(moovBuf.slice(mdhd.off, mdhd.off+mdhd.size));
-    const mdhdV = mdhdBuf[8];
-    wu32(mdhdBuf, mdhdV === 1 ? 28 : 24, Math.round(clipDurSeg * track.tScale));
-    wu32(mdhdBuf, 0, mdhdBuf.byteLength);
-
-    const hdlrBox = new Uint8Array(moovBuf.slice(hdlr.off, hdlr.off+hdlr.size));
-    const mdiaKids = [];
-    iterBoxes(moovView, mdia.off+8, mdiaEnd, (name, o, size) => {
-      if (!['mdhd','hdlr','minf'].includes(name))
-        mdiaKids.push(new Uint8Array(moovBuf.slice(o, o+size)));
-    });
-    const newMdiaBox = writeBox('mdia', concatU8(mdhdBuf, hdlrBox, ...mdiaKids, newMinfBox));
-
-    // tkhd — patch duration
-    const tkhdBuf = new Uint8Array(moovBuf.slice(tkhd.off, tkhd.off+tkhd.size));
-    const tkhdV = tkhdBuf[8];
-    wu32(tkhdBuf, tkhdV === 1 ? 36 : 28, Math.round(clipDurSeg * movieTimescale));
-    wu32(tkhdBuf, 0, tkhdBuf.byteLength);
-
-    // edts rebuild
-    let newEdtsBox = null;
-    if (track.elstEntries && track.elstEntries.length > 0) {
-      const clipMovieTicks = Math.round(clipDurSeg * movieTimescale);
-      const newEntries = [];
-      if (track.elstEntries.length === 1) {
-        newEntries.push({ segDur: clipMovieTicks, mediaTime: track.elstEntries[0].mediaTime });
-      } else {
-        let remaining = clipMovieTicks;
-        for (const e of track.elstEntries) {
-          if (e.mediaTime === 0xFFFFFFFF) {
-            newEntries.push({ segDur: e.segDur, mediaTime: 0xFFFFFFFF });
-            remaining -= e.segDur;
-          } else {
-            newEntries.push({ segDur: Math.max(remaining, 1), mediaTime: e.mediaTime });
-          }
-        }
-      }
-      newEdtsBox = buildElst(newEntries, movieTimescale);
-    }
-
-    const trakKids = [];
-    iterBoxes(moovView, track.trakOff+8, trakEnd, (name, o, size) => {
-      if (!['tkhd','mdia','edts'].includes(name))
-        trakKids.push(new Uint8Array(moovBuf.slice(o, o+size)));
-    });
-    newTrakBoxes.push(writeBox('trak',
-      concatU8(tkhdBuf, ...trakKids, ...(newEdtsBox ? [newEdtsBox] : []), newMdiaBox)));
-  }
-
-  // mvhd — patch duration
-  const mvhd   = findBox(moovView, 8, moovEnd, 'mvhd');
-  const mvhdBuf = new Uint8Array(moovBuf.slice(mvhd.off, mvhd.off+mvhd.size));
-  const mvhdV  = mvhdBuf[8];
-  const segDurSec = segSamples[segSamples.length-1].dts - segSamples[0].dts;
-  wu32(mvhdBuf, mvhdV === 1 ? 28 : 20, Math.round(segDurSec * movieTimescale));
-  wu32(mvhdBuf, 0, mvhdBuf.byteLength);
-
-  const moovKids = [];
-  iterBoxes(moovView, 8, moovEnd, (name, o, size) => {
-    if (!['mvhd','trak','udta'].includes(name))
-      moovKids.push(new Uint8Array(moovBuf.slice(o, o+size)));
-  });
-  const segMoovBox = writeBox('moov', concatU8(mvhdBuf, ...moovKids, ...newTrakBoxes));
-
-  // Patch stco absolute offsets
-  const segMdatAbsStart = ftypBox.byteLength + segMoovBox.byteLength + 8;
-  const snmv = new DataView(segMoovBox.buffer, segMoovBox.byteOffset, segMoovBox.byteLength);
-  function patchSegStco(view, arr, start, end) {
-    iterBoxes(view, start, end, (name, o, size, hs) => {
-      if (name === 'stco') {
-        const b = o+hs+4; const c = ru32(view, b);
-        for (let i = 0; i < c; i++) wu32(arr, b+4+i*4, segMdatAbsStart + ru32(view, b+4+i*4));
-      } else if (['moov','trak','mdia','minf','stbl'].includes(name)) {
-        patchSegStco(view, arr, o+hs, o+size);
-      }
-    });
-  }
-  patchSegStco(snmv, segMoovBox, 8, segMoovBox.byteLength);
-
-  // mdat header
-  const segMdatHdr = new Uint8Array(8);
-  const dv = new DataView(segMdatHdr.buffer);
-  dv.setUint32(0, segPayloadSize + 8);
-  dv.setUint32(4, 0x6d646174); // 'mdat'
-
-  return { segMoovBox, segMdatHdr };
-}
 
 
 /* ── ✂ Export button — chunked download ── */
@@ -2283,26 +2332,8 @@ document.getElementById('loop-export').addEventListener('click', async e => {
 
   /* readChunk: read a slice of currentFile with retry.
      Safari iOS FileReader can fail on large or misaligned reads — retry up to 3× */
-  async function readChunk(start, end) {
-    for (let attempt = 0; attempt < 3; attempt++) {
-      try {
-        const buf = await new Promise((res, rej) => {
-          const r = new FileReader();
-          r.onload = ev => {
-            const ab = ev.target.result;
-            if (!ab || ab.byteLength === 0) rej(new Error('empty'));
-            else res(ab);
-          };
-          r.onerror = () => rej(new Error('fr'));
-          r.readAsArrayBuffer(currentFile.slice(start, end));
-        });
-        return new Uint8Array(buf);
-      } catch(_) {
-        if (attempt === 2) throw new Error('讀取失敗 @ ' + start);
-        await new Promise(r => setTimeout(r, 150 * (attempt + 1)));
-      }
-    }
-  }
+  async 
+
 
   try {
     if (['mp4','mov','m4v'].includes(ext)) {
