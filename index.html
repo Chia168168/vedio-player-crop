@@ -1673,28 +1673,8 @@ async function trimMp4(file, startSec, endSec, onProgress) {
       for(let j=0;j<sc.samplesPerChunk&&si<sampleCount;j++,si++){sampleOffsets[si]=off;off+=sizes[si];}
     }
 
-    /* parse elst (edit list) — needed to detect audio encoder delay */
-    let elstMediaTime = 0; // media_time of first edit entry (in track timescale)
-    const edtsBox = findBox(moovView, o+8, trakEnd, 'edts');
-    if (edtsBox) {
-      const elst = findBox(moovView, edtsBox.off+8, edtsBox.off+edtsBox.size, 'elst');
-      if (elst) {
-        const ev = elst.off + elst.hs;
-        const elstVer = moovView.getUint8(ev);
-        const entryCount = ru32(moovView, ev+4);
-        if (entryCount > 0) {
-          if (elstVer === 1) {
-            // 8-byte fields: skip segment_duration(8), read media_time(8)
-            elstMediaTime = Number(ru64(moovView, ev+8+8));
-          } else {
-            // 4-byte fields: skip segment_duration(4), read media_time(4)
-            elstMediaTime = ru32(moovView, ev+8+4);
-          }
-        }
-      }
-    }
     tracks.push({tScale,sttsList,sampleTimes,sampleCts,sampleOffsets,sizes,keyframes,
-                 trakOff:o,trakSize:size,ctsList,elstMediaTime});
+                 trakOff:o,trakSize:size,ctsList});
   });
   if(tracks.length===0) throw new Error('找不到 track 資料');
 
@@ -1725,24 +1705,30 @@ async function trimMp4(file, startSec, endSec, onProgress) {
     const tS=Math.round(actualStart*track.tScale);
     const tE=Math.round(actualEnd*track.tScale);
     let first=-1,last=-1;
-    // first: first sample at or after (tS + elstMediaTime) — accounts for edit list offset
-    const tSadj = tS + (track.elstMediaTime || 0);
+    // first: first sample at or after tS
     for(let i=0;i<track.sampleTimes.length;i++){
-      if(track.sampleTimes[i]>=tSadj){ first=i; break; }
+      if(track.sampleTimes[i]>=tS){ first=i; break; }
     }
     if(first===-1) first=track.sampleTimes.length-1; // fallback: last sample
-    // last: last sample before (tE + elstMediaTime)
-    const tEadj = tE + (track.elstMediaTime || 0);
+    // last: last sample before tE
     for(let i=track.sampleTimes.length-1;i>=0;i--){
-      if(track.sampleTimes[i]<tEadj){ last=i; break; }
+      if(track.sampleTimes[i]<tE){ last=i; break; }
     }
     if(last===-1||last<first) last=first;
     track._first=first; track._last=last;
     const ti = tracks.indexOf(track);
-    dbgStr += ` | T${ti}: first_t=${(track.sampleTimes[first]/track.tScale).toFixed(4)}s elst=${(track.elstMediaTime/track.tScale).toFixed(4)}s`;
+    dbgStr += ` | T${ti}: first_t=${(track.sampleTimes[first]/track.tScale).toFixed(4)}s last_t=${(track.sampleTimes[last]/track.tScale).toFixed(4)}s kf=${!!track.keyframes}`;
     for(let i=first;i<=last;i++)
       rangesNeeded.push({start:track.sampleOffsets[i],end:track.sampleOffsets[i]+track.sizes[i]});
   }
+  // Add newDeltas[0] per track to debug
+  tracks.forEach((tr,ti)=>{
+    if(tr._first===undefined) return;
+    const d0 = tr._first+1 < tr.sampleTimes.length
+      ? tr.sampleTimes[tr._first+1]-tr.sampleTimes[tr._first]
+      : (tr.sttsList[0]?.delta||0);
+    dbgStr += ` d0T${ti}=${(d0/tr.tScale*1000).toFixed(1)}ms`;
+  });
   exportStatus.textContent = dbgStr;
   await new Promise(r=>setTimeout(r, 12000));
   await new Promise(r=>setTimeout(r,10000)); // freeze to read debug
