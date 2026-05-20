@@ -1720,11 +1720,19 @@ async function trimMp4(file, startSec, endSec, onProgress) {
       rangesNeeded.push({start:track.sampleOffsets[i],end:track.sampleOffsets[i]+track.sizes[i]});
   }
 
-  /* debug: log track info to console */
-  tracks.forEach((tr,ti)=>{
-    const dur=(tr._last!==undefined)?(tr.sampleTimes[tr._last]-tr.sampleTimes[tr._first])/tr.tScale:0;
-    console.log(`Track[${ti}] tScale=${tr.tScale} samples=${tr.sampleTimes.length} first=${tr._first} last=${tr._last} dur=${dur.toFixed(3)}s hasKF=${!!tr.keyframes} newChunkOffsets_len=${tr._first!==undefined?tr._last-tr._first+1:0}`);
-  });
+  /* debug: show track info in visible overlay */
+  {
+    const lines = tracks.map((tr,ti)=>{
+      const dur=(tr._last!==undefined&&tr._first!==undefined)
+        ?(tr.sampleTimes[tr._last]-tr.sampleTimes[tr._first])/tr.tScale:0;
+      return `T${ti}: scale=${tr.tScale} n=${tr.sampleTimes.length} `+
+             `first=${tr._first} last=${tr._last} `+
+             `dur=${dur.toFixed(2)}s kf=${!!tr.keyframes}`;
+    });
+    exportStatus.textContent = lines.join(' | ');
+    // freeze overlay so user can read it
+    await new Promise(r => setTimeout(r, 8000));
+  }
 
   rangesNeeded.sort((a,b)=>a.start-b.start);
   const merged=[];
@@ -1749,7 +1757,8 @@ async function trimMp4(file, startSec, endSec, onProgress) {
       mdatOffset+=track.sizes[i];
     }
   }
-  console.log('orderedSamples total:',orderedSamples.length,'mdatBytes:',orderedSamples.reduce((s,r)=>s+r.size,0));
+  exportStatus.textContent += ' | samples='+orderedSamples.length+' bytes='+orderedSamples.reduce((s,r)=>s+r.size,0);
+  await new Promise(r => setTimeout(r, 6000));
   const mdatPayloadSize=orderedSamples.reduce((s,r)=>s+r.size,0);
 
   /* ── grab ftyp ── */
