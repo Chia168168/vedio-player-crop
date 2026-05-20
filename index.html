@@ -1730,8 +1730,7 @@ async function trimMp4(file, startSec, endSec, onProgress) {
              `dur=${dur.toFixed(2)}s kf=${!!tr.keyframes}`;
     });
     exportStatus.textContent = lines.join(' | ');
-    // freeze overlay so user can read it
-    await new Promise(r => setTimeout(r, 8000));
+    await new Promise(r => setTimeout(r, 3000));
   }
 
   rangesNeeded.sort((a,b)=>a.start-b.start);
@@ -1757,8 +1756,7 @@ async function trimMp4(file, startSec, endSec, onProgress) {
       mdatOffset+=track.sizes[i];
     }
   }
-  exportStatus.textContent += ' | samples='+orderedSamples.length+' bytes='+orderedSamples.reduce((s,r)=>s+r.size,0);
-  await new Promise(r => setTimeout(r, 6000));
+
   const mdatPayloadSize=orderedSamples.reduce((s,r)=>s+r.size,0);
 
   /* ── grab ftyp ── */
@@ -1975,19 +1973,6 @@ async function trimMp4(file, startSec, endSec, onProgress) {
   }
   patchStco(nmv,newMoovBox,8,newMoovBox.byteLength);
 
-  /* debug: show stco first values per track */
-  {
-    const dbgLines = [];
-    tracks.forEach((tr,ti)=>{
-      if(tr._first===undefined) return;
-      const offs = newChunkOffsets[ti];
-      dbgLines.push(`T${ti} stco[0]_rel=${offs[0]} stco[last]_rel=${offs[offs.length-1]} n=${offs.length}`);
-    });
-    dbgLines.push(`mdatAbsStart=${ftypBox.byteLength+newMoovBox.byteLength+8}`);
-    exportStatus.textContent = dbgLines.join(' | ');
-    await new Promise(r=>setTimeout(r,10000));
-  }
-
   /* ── return structured parts — caller handles chunked download ── */
   onProgress(0.93,'組合輸出…');
   const mdatHeader=new Uint8Array(8);
@@ -2088,38 +2073,45 @@ document.getElementById('loop-export').addEventListener('click', async e => {
 
       const { ftypBox, newMoovBox, mdatHeader, orderedSamples } = result;
 
-      // Merge consecutive sample regions to minimise FileReader calls
-      const regions = [];
-      for (const { fileStart, size } of orderedSamples) {
-        const last = regions[regions.length - 1];
-        if (last && fileStart <= last.end + 1)
-          last.end = Math.max(last.end, fileStart + size);
-        else
-          regions.push({ start: fileStart, end: fileStart + size });
-      }
-
-      // Read sample data in 512 KB pieces, push into parts[]
-      // Safari Blob([...Uint8Arrays]) stores references — no extra copy until download
-      const PIECE = 512 * 1024;
+      // Read orderedSamples in EXACT output order (track-separated: all video → all audio)
+      // DO NOT merge by file position — source file is interleaved but output must be sequential
       const totalBytes = orderedSamples.reduce((s, r) => s + r.size, 0);
       const parts = [ftypBox, newMoovBox, mdatHeader];
       let readBytes = 0;
+      const total = orderedSamples.length;
 
       exportProgressF.style.width = '68%';
       exportStatus.textContent = '讀取資料…';
 
-      for (const region of regions) {
-        let pos = region.start;
-        while (pos < region.end) {
+      // Batch adjacent samples (consecutive in both output AND source file)
+      // to reduce FileReader calls without breaking output order
+      const batches = [];
+      for (const s of orderedSamples) {
+        const last = batches[batches.length - 1];
+        // Only merge if this sample immediately follows the previous in the source file
+        if (last && last.srcEnd === s.fileStart) {
+          last.srcEnd = s.fileStart + s.size;
+          last.outSize += s.size;
+        } else {
+          batches.push({ srcStart: s.fileStart, srcEnd: s.fileStart + s.size, outSize: s.size });
+        }
+      }
+
+      for (const batch of batches) {
+        if (exportCancelled) { exportOverlay.classList.remove('show'); return; }
+        // Read this batch in 512KB pieces to stay under iOS FileReader limit
+        const PIECE = 512 * 1024;
+        let pos = batch.srcStart;
+        while (pos < batch.srcEnd) {
           if (exportCancelled) { exportOverlay.classList.remove('show'); return; }
-          const chunkEnd = Math.min(pos + PIECE, region.end);
+          const chunkEnd = Math.min(pos + PIECE, batch.srcEnd);
           const chunk = await readChunk(pos, chunkEnd);
           parts.push(chunk);
           readBytes += chunkEnd - pos;
           pos = chunkEnd;
           exportProgressF.style.width = Math.round(68 + 28 * readBytes / totalBytes) + '%';
           exportStatus.textContent = `讀取 ${Math.round(100 * readBytes / totalBytes)}%…`;
-          await new Promise(r => setTimeout(r, 0)); // yield UI
+          await new Promise(r => setTimeout(r, 0));
         }
       }
 
