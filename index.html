@@ -1762,7 +1762,9 @@ async function trimMp4(file, startSec, endSec, onProgress) {
     if(track._first===undefined)continue;
     for(let i=track._first;i<=track._last;i++){
       newChunkOffsets[ti].push(mdatOffset);
-      orderedSamples.push({fileStart:track.sampleOffsets[i],size:track.sizes[i]});
+      orderedSamples.push({fileStart:track.sampleOffsets[i],size:track.sizes[i],
+        ti, dts:(track.sampleTimes[i]/track.tScale),
+        isKF: ti===0 && track.keyframes && track.keyframes.includes(i)});
       mdatOffset+=track.sizes[i];
     }
   }
@@ -2028,7 +2030,7 @@ async function trimMp4(file, startSec, endSec, onProgress) {
   const mdatHeader=new Uint8Array(8);
   wu32(mdatHeader,0,8+mdatPayloadSize);
   'mdat'.split('').forEach((c,i)=>mdatHeader[4+i]=c.charCodeAt(0));
-  return { ftypBox, newMoovBox, mdatHeader, orderedSamples, mdatPayloadSize };
+  return { ftypBox, newMoovBox, mdatHeader, orderedSamples, _moovBuf: moovBuf, _tracks: tracks, _movieTimescale: movieTimescale };
 }
 
 /* ═══════════════════════════════════════════════
@@ -2067,13 +2069,201 @@ async function trimByMediaRecorder(startSec, endSec, onProgress) {
   });
 }
 
+/* ── buildSegmentHeaders: rebuild ftyp+moov+mdat-header for a sub-range of samples ── */
+async function buildSegmentHeaders(tracks, segSamples, movieTimescale, ftypBox, moovBuf) {
+  const moovView = new DataView(moovBuf);
+  const moovEnd  = moovBuf.byteLength;
+
+  // Per-track: collect this segment's samples in output order
+  const trackSamples = {};
+  for (const s of segSamples) {
+    if (!trackSamples[s.ti]) trackSamples[s.ti] = [];
+    trackSamples[s.ti].push(s);
+  }
+
+  // Rebuild stco offsets (relative to segment mdat start)
+  const newChunkOffsets = {};
+  let mdatOff = 0;
+  for (const s of segSamples) {
+    if (!newChunkOffsets[s.ti]) newChunkOffsets[s.ti] = [];
+    newChunkOffsets[s.ti].push(mdatOff);
+    mdatOff += s.size;
+  }
+  const segPayloadSize = mdatOff;
+
+  const newTrakBoxes = [];
+  for (const track of tracks) {
+    const ti = tracks.indexOf(track);
+    const tSamples = trackSamples[ti];
+    if (!tSamples || tSamples.length === 0) continue;
+
+    // Duration of this segment for this track
+    const lastDelta = tSamples.length > 1
+      ? Math.round((tSamples[tSamples.length-1].dts - tSamples[tSamples.length-2].dts) * track.tScale)
+      : (track.sttsList[0]?.delta || 1);
+    const clipDurSeg = tSamples[tSamples.length-1].dts - tSamples[0].dts
+                     + lastDelta / track.tScale;
+
+    const trakEnd = track.trakOff + track.trakSize;
+    const mdia    = findBox(moovView, track.trakOff+8, trakEnd, 'mdia');
+    const mdiaEnd = mdia.off + mdia.size;
+    const minf    = findBox(moovView, mdia.off+8, mdiaEnd, 'minf');
+    const stbl    = findBox(moovView, minf.off+8, minf.off+minf.size, 'stbl');
+    const stblEnd = stbl.off + stbl.size;
+    const tkhd    = findBox(moovView, track.trakOff+8, trakEnd, 'tkhd');
+    const mdhd    = findBox(moovView, mdia.off+8, mdiaEnd, 'mdhd');
+    const hdlr    = findBox(moovView, mdia.off+8, mdiaEnd, 'hdlr');
+
+    // stts deltas
+    const newDeltas = tSamples.map((s, i) => {
+      const next = tSamples[i+1];
+      const d = next
+        ? Math.round((next.dts - s.dts) * track.tScale)
+        : lastDelta;
+      return Math.max(1, d);
+    });
+
+    // Find full-track index of first sample in this segment
+    const tSfirst = Math.round(tSamples[0].dts * track.tScale);
+    let fullFirst = 0;
+    for (let i = 0; i < track.sampleTimes.length; i++) {
+      if (track.sampleTimes[i] >= tSfirst) { fullFirst = i; break; }
+    }
+
+    // ctts
+    let newCttsBox = null;
+    if (track.ctsList) {
+      const newCts = tSamples.map((_, i) => track.sampleCts[fullFirst + i] || 0);
+      if (newCts.some(v => v !== 0)) newCttsBox = buildCtts(newCts);
+    }
+
+    // stss keyframes
+    let newStss = null;
+    if (track.keyframes) {
+      const kfSet = new Set(track.keyframes);
+      const nkf = tSamples.map((_, i) => kfSet.has(fullFirst + i) ? i : -1).filter(i => i >= 0);
+      if (nkf.length === 0) nkf.push(0);
+      newStss = buildStss(nkf);
+    }
+
+    // stbl
+    const stblKids = [];
+    iterBoxes(moovView, stbl.off+8, stblEnd, (name, o, size) => {
+      if (name === 'stsd') stblKids.push(new Uint8Array(moovBuf.slice(o, o+size)));
+    });
+    const newStblBox = writeBox('stbl', concatU8(
+      ...stblKids,
+      buildStts(newDeltas),
+      ...(newCttsBox ? [newCttsBox] : []),
+      ...(newStss    ? [newStss]    : []),
+      buildStsz(tSamples.map(s => s.size)),
+      buildStsc(),
+      buildStco(newChunkOffsets[ti])
+    ));
+
+    // minf
+    const minfKids = [];
+    iterBoxes(moovView, minf.off+8, minf.off+minf.size, (name, o, size) => {
+      if (name !== 'stbl') minfKids.push(new Uint8Array(moovBuf.slice(o, o+size)));
+    });
+    const newMinfBox = writeBox('minf', concatU8(...minfKids, newStblBox));
+
+    // mdhd — patch duration
+    const mdhdBuf = new Uint8Array(moovBuf.slice(mdhd.off, mdhd.off+mdhd.size));
+    const mdhdV = mdhdBuf[8];
+    wu32(mdhdBuf, mdhdV === 1 ? 28 : 24, Math.round(clipDurSeg * track.tScale));
+    wu32(mdhdBuf, 0, mdhdBuf.byteLength);
+
+    const hdlrBox = new Uint8Array(moovBuf.slice(hdlr.off, hdlr.off+hdlr.size));
+    const mdiaKids = [];
+    iterBoxes(moovView, mdia.off+8, mdiaEnd, (name, o, size) => {
+      if (!['mdhd','hdlr','minf'].includes(name))
+        mdiaKids.push(new Uint8Array(moovBuf.slice(o, o+size)));
+    });
+    const newMdiaBox = writeBox('mdia', concatU8(mdhdBuf, hdlrBox, ...mdiaKids, newMinfBox));
+
+    // tkhd — patch duration
+    const tkhdBuf = new Uint8Array(moovBuf.slice(tkhd.off, tkhd.off+tkhd.size));
+    const tkhdV = tkhdBuf[8];
+    wu32(tkhdBuf, tkhdV === 1 ? 36 : 28, Math.round(clipDurSeg * movieTimescale));
+    wu32(tkhdBuf, 0, tkhdBuf.byteLength);
+
+    // edts rebuild
+    let newEdtsBox = null;
+    if (track.elstEntries && track.elstEntries.length > 0) {
+      const clipMovieTicks = Math.round(clipDurSeg * movieTimescale);
+      const newEntries = [];
+      if (track.elstEntries.length === 1) {
+        newEntries.push({ segDur: clipMovieTicks, mediaTime: track.elstEntries[0].mediaTime });
+      } else {
+        let remaining = clipMovieTicks;
+        for (const e of track.elstEntries) {
+          if (e.mediaTime === 0xFFFFFFFF) {
+            newEntries.push({ segDur: e.segDur, mediaTime: 0xFFFFFFFF });
+            remaining -= e.segDur;
+          } else {
+            newEntries.push({ segDur: Math.max(remaining, 1), mediaTime: e.mediaTime });
+          }
+        }
+      }
+      newEdtsBox = buildElst(newEntries, movieTimescale);
+    }
+
+    const trakKids = [];
+    iterBoxes(moovView, track.trakOff+8, trakEnd, (name, o, size) => {
+      if (!['tkhd','mdia','edts'].includes(name))
+        trakKids.push(new Uint8Array(moovBuf.slice(o, o+size)));
+    });
+    newTrakBoxes.push(writeBox('trak',
+      concatU8(tkhdBuf, ...trakKids, ...(newEdtsBox ? [newEdtsBox] : []), newMdiaBox)));
+  }
+
+  // mvhd — patch duration
+  const mvhd   = findBox(moovView, 8, moovEnd, 'mvhd');
+  const mvhdBuf = new Uint8Array(moovBuf.slice(mvhd.off, mvhd.off+mvhd.size));
+  const mvhdV  = mvhdBuf[8];
+  const segDurSec = segSamples[segSamples.length-1].dts - segSamples[0].dts;
+  wu32(mvhdBuf, mvhdV === 1 ? 28 : 20, Math.round(segDurSec * movieTimescale));
+  wu32(mvhdBuf, 0, mvhdBuf.byteLength);
+
+  const moovKids = [];
+  iterBoxes(moovView, 8, moovEnd, (name, o, size) => {
+    if (!['mvhd','trak','udta'].includes(name))
+      moovKids.push(new Uint8Array(moovBuf.slice(o, o+size)));
+  });
+  const segMoovBox = writeBox('moov', concatU8(mvhdBuf, ...moovKids, ...newTrakBoxes));
+
+  // Patch stco absolute offsets
+  const segMdatAbsStart = ftypBox.byteLength + segMoovBox.byteLength + 8;
+  const snmv = new DataView(segMoovBox.buffer, segMoovBox.byteOffset, segMoovBox.byteLength);
+  function patchSegStco(view, arr, start, end) {
+    iterBoxes(view, start, end, (name, o, size, hs) => {
+      if (name === 'stco') {
+        const b = o+hs+4; const c = ru32(view, b);
+        for (let i = 0; i < c; i++) wu32(arr, b+4+i*4, segMdatAbsStart + ru32(view, b+4+i*4));
+      } else if (['moov','trak','mdia','minf','stbl'].includes(name)) {
+        patchSegStco(view, arr, o+hs, o+size);
+      }
+    });
+  }
+  patchSegStco(snmv, segMoovBox, 8, segMoovBox.byteLength);
+
+  // mdat header
+  const segMdatHdr = new Uint8Array(8);
+  const dv = new DataView(segMdatHdr.buffer);
+  dv.setUint32(0, segPayloadSize + 8);
+  dv.setUint32(4, 0x6d646174); // 'mdat'
+
+  return { segMoovBox, segMdatHdr };
+}
+
+
 /* ── ✂ Export button — chunked download ── */
 /* Strategy: trimMp4 returns {ftypBox, newMoovBox, mdatParts, mdatPayloadSize}.
    We build ftyp+moov+mdat_header once (tiny), then stream mdat sample-blobs
    in CHUNK_MB slices so Safari never holds >~100 MB at once.            */
-const CHUNK_BYTES = 60 * 1024 * 1024; // 60 MB per part file
 
-document.getElementById('loop-export').addEventListener('click', async e => {
+getElementById('loop-export').addEventListener('click', async e => {
   e.stopPropagation();
   if (loopIn === null || loopOut === null) { showToast('請先設定 IN / OUT'); return; }
   if (!currentFile) { showToast('沒有影片檔案'); return; }
@@ -2123,22 +2313,28 @@ document.getElementById('loop-export').addEventListener('click', async e => {
 
       const { ftypBox, newMoovBox, mdatHeader, orderedSamples } = result;
 
-      // Read orderedSamples in EXACT output order (track-separated: all video → all audio)
-      // DO NOT merge by file position — source file is interleaved but output must be sequential
+      const SPLIT_LIMIT = 300 * 1024 * 1024; // 300 MB per segment
       const totalBytes = orderedSamples.reduce((s, r) => s + r.size, 0);
-      const parts = [ftypBox, newMoovBox, mdatHeader];
-      let readBytes = 0;
-      const total = orderedSamples.length;
+      const headerBytes = ftypBox.byteLength + newMoovBox.byteLength + mdatHeader.byteLength;
 
-      exportProgressF.style.width = '68%';
-      exportStatus.textContent = '讀取資料…';
+      // Calculate how many segments needed
+      const totalOutputBytes = headerBytes + totalBytes;
+      const segCount = Math.ceil(totalOutputBytes / SPLIT_LIMIT);
 
-      // Batch adjacent samples (consecutive in both output AND source file)
-      // to reduce FileReader calls without breaking output order
+      // Ask user confirmation if multi-segment
+      if (segCount > 1) {
+        const ok = window.confirm(
+          `輸出檔案約 ${(totalOutputBytes/1024/1024).toFixed(0)} MB，\n` +
+          `將自動切成 ${segCount} 段（每段 ≤300 MB），\n` +
+          `每段為獨立完整的影片檔案。\n\n確定要繼續嗎？`
+        );
+        if (!ok) { exportOverlay.classList.remove('show'); return; }
+      }
+
+      // Build sample batches (preserve output order, batch only physically adjacent source bytes)
       const batches = [];
       for (const s of orderedSamples) {
         const last = batches[batches.length - 1];
-        // Only merge if this sample immediately follows the previous in the source file
         if (last && last.srcEnd === s.fileStart) {
           last.srcEnd = s.fileStart + s.size;
           last.outSize += s.size;
@@ -2147,34 +2343,129 @@ document.getElementById('loop-export').addEventListener('click', async e => {
         }
       }
 
-      for (const batch of batches) {
-        if (exportCancelled) { exportOverlay.classList.remove('show'); return; }
-        // Read this batch in 512KB pieces to stay under iOS FileReader limit
+      // Helper: read all batches in output order, call onChunk(Uint8Array) for each piece
+      async function readAllChunks(onChunk, onProgress) {
         const PIECE = 512 * 1024;
-        let pos = batch.srcStart;
-        while (pos < batch.srcEnd) {
-          if (exportCancelled) { exportOverlay.classList.remove('show'); return; }
-          const chunkEnd = Math.min(pos + PIECE, batch.srcEnd);
-          const chunk = await readChunk(pos, chunkEnd);
-          parts.push(chunk);
-          readBytes += chunkEnd - pos;
-          pos = chunkEnd;
-          exportProgressF.style.width = Math.round(68 + 28 * readBytes / totalBytes) + '%';
-          exportStatus.textContent = `讀取 ${Math.round(100 * readBytes / totalBytes)}%…`;
-          await new Promise(r => setTimeout(r, 0));
+        let readBytes = 0;
+        for (const batch of batches) {
+          if (exportCancelled) return false;
+          let pos = batch.srcStart;
+          while (pos < batch.srcEnd) {
+            if (exportCancelled) return false;
+            const chunkEnd = Math.min(pos + PIECE, batch.srcEnd);
+            const chunk = await readChunk(pos, chunkEnd);
+            onChunk(new Uint8Array(chunk));
+            readBytes += chunkEnd - pos;
+            onProgress(readBytes, totalBytes);
+            pos = chunkEnd;
+            await new Promise(r => setTimeout(r, 0));
+          }
         }
+        return true;
       }
 
-      exportProgressF.style.width = '98%';
-      exportStatus.textContent = '下載中…';
+      // Helper: trigger download of a Blob
+      function triggerDownload(blob, fname) {
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url; a.download = fname;
+        document.body.appendChild(a); a.click(); document.body.removeChild(a);
+        setTimeout(() => URL.revokeObjectURL(url), 30000);
+      }
 
-      // Build Blob from parts — Safari stores refs, not copies
-      const blob = new Blob(parts, { type: mimeType });
-      const url  = URL.createObjectURL(blob);
-      const a    = document.createElement('a');
-      a.href = url; a.download = filename;
-      document.body.appendChild(a); a.click(); document.body.removeChild(a);
-      setTimeout(() => URL.revokeObjectURL(url), 30000);
+      exportProgressF.style.width = '68%';
+      exportStatus.textContent = '讀取資料…';
+
+      if (segCount === 1) {
+        // Single segment — original simple path
+        const parts = [ftypBox, newMoovBox, mdatHeader];
+        const ok = await readAllChunks(
+          chunk => parts.push(chunk),
+          (rb, tb) => {
+            exportProgressF.style.width = Math.round(68 + 28 * rb / tb) + '%';
+            exportStatus.textContent = `讀取 ${Math.round(100 * rb / tb)}%…`;
+          }
+        );
+        if (!ok || exportCancelled) { exportOverlay.classList.remove('show'); return; }
+        exportProgressF.style.width = '98%';
+        exportStatus.textContent = '下載中…';
+        triggerDownload(new Blob(parts, { type: mimeType }), filename);
+
+      } else {
+        // Multi-segment: split at keyframe boundaries closest to each 300MB mark
+        const PAYLOAD_LIMIT = SPLIT_LIMIT - headerBytes;
+
+        // Find keyframe positions (isKF=true, ti=0) in orderedSamples
+        // Split so each segment payload ≤ PAYLOAD_LIMIT, always ending at a keyframe
+        const segments = [];
+        let segStart = 0;
+        let segBytes = 0;
+        for (let si = 0; si < orderedSamples.length; si++) {
+          const s = orderedSamples[si];
+          segBytes += s.size;
+          const isLast = si === orderedSamples.length - 1;
+          // Cut here if: over limit AND next sample is a keyframe (or last)
+          const nextIsKF = si + 1 < orderedSamples.length &&
+            orderedSamples[si+1].isKF && orderedSamples[si+1].ti === 0;
+          if ((segBytes >= PAYLOAD_LIMIT && nextIsKF) || isLast) {
+            segments.push(orderedSamples.slice(segStart, si+1));
+            segStart = si + 1;
+            segBytes = 0;
+          }
+        }
+
+        // Re-fetch moovBuf for segment header rebuilding
+        const moovBufForSeg = result._moovBuf;
+
+        for (let si = 0; si < segments.length; si++) {
+          if (exportCancelled) { exportOverlay.classList.remove('show'); return; }
+          const seg = segments[si];
+          exportStatus.textContent = `第 ${si+1}/${segments.length} 段 — 建立標頭…`;
+          await new Promise(r => setTimeout(r, 0));
+
+          const { segMoovBox, segMdatHdr } = await buildSegmentHeaders(
+            result._tracks, seg, result._movieTimescale, ftypBox, moovBufForSeg
+          );
+
+          // Read segment samples
+          const segBatches = [];
+          for (const s of seg) {
+            const last = segBatches[segBatches.length-1];
+            if (last && last.srcEnd === s.fileStart) {
+              last.srcEnd = s.fileStart + s.size;
+            } else {
+              segBatches.push({ srcStart: s.fileStart, srcEnd: s.fileStart + s.size });
+            }
+          }
+
+          const segParts = [ftypBox, segMoovBox, segMdatHdr];
+          const segTotal = seg.reduce((a,s)=>a+s.size,0);
+          let segRead = 0;
+          const PIECE = 512 * 1024;
+          for (const batch of segBatches) {
+            if (exportCancelled) { exportOverlay.classList.remove('show'); return; }
+            let pos = batch.srcStart;
+            while (pos < batch.srcEnd) {
+              if (exportCancelled) { exportOverlay.classList.remove('show'); return; }
+              const chunkEnd = Math.min(pos + PIECE, batch.srcEnd);
+              const chunk = await readChunk(pos, chunkEnd);
+              segParts.push(new Uint8Array(chunk));
+              segRead += chunkEnd - pos;
+              pos = chunkEnd;
+              exportProgressF.style.width = Math.round(68 + 28 * segRead / segTotal) + '%';
+              exportStatus.textContent = `第 ${si+1}/${segments.length} 段 — 讀取 ${Math.round(100*segRead/segTotal)}%`;
+              await new Promise(r => setTimeout(r, 0));
+            }
+          }
+
+          exportProgressF.style.width = '98%';
+          exportStatus.textContent = `第 ${si+1}/${segments.length} 段 — 下載中…`;
+          const segFilename = filename.replace(/(\.[^.]+)$/, `_part${si+1}of${segments.length}$1`);
+          triggerDownload(new Blob(segParts, { type: mimeType }), segFilename);
+          // Small delay between downloads so browser processes each one
+          await new Promise(r => setTimeout(r, 1500));
+        }
+      }
 
       exportProgressF.style.width = '100%';
       exportStatus.textContent = '完成！';
