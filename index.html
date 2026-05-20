@@ -2132,9 +2132,6 @@ document.getElementById('loop-export').addEventListener('click', async e => {
   const base     = currentFile.name.replace(/\.[^.]+$/, '') || 'clip';
   const mimeType = ext === 'mov' ? 'video/quicktime' : 'video/mp4';
 
-  /* readChunk helper (same as before) */
-  async 
-
 
   /* downloadParts: assemble parts array into a Blob and trigger download */
   async function downloadParts(parts, filename) {
