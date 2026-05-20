@@ -1718,6 +1718,7 @@ async function trimMp4(file, startSec, endSec, onProgress) {
     for(let i=first;i<=last;i++)
       rangesNeeded.push({start:track.sampleOffsets[i],end:track.sampleOffsets[i]+track.sizes[i]});
   }
+  await new Promise(r=>setTimeout(r,10000)); // freeze to read debug
 
   /* debug: show track info in visible overlay */
   {
