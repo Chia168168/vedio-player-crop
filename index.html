@@ -2263,7 +2263,7 @@ async function buildSegmentHeaders(tracks, segSamples, movieTimescale, ftypBox, 
    We build ftyp+moov+mdat_header once (tiny), then stream mdat sample-blobs
    in CHUNK_MB slices so Safari never holds >~100 MB at once.            */
 
-getElementById('loop-export').addEventListener('click', async e => {
+document.getElementById('loop-export').addEventListener('click', async e => {
   e.stopPropagation();
   if (loopIn === null || loopOut === null) { showToast('請先設定 IN / OUT'); return; }
   if (!currentFile) { showToast('沒有影片檔案'); return; }
