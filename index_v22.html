@@ -1,0 +1,844 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Frame Player">
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#0a0a0c;color:#e8e8f0;font-family:-apple-system,BlinkMacSystemFont,'SF Pro Display',sans-serif;min-height:100vh;overflow-x:hidden}
+.container{max-width:900px;margin:0 auto;padding:16px}
+.header{text-align:center;padding:20px 0 16px}
+.header h1{font-size:1.4rem;font-weight:700;color:#fff;letter-spacing:0.5px}
+.header p{font-size:0.8rem;color:#888;margin-top:4px}
+.upload-area{border:2px dashed #333;border-radius:16px;padding:32px;text-align:center;cursor:pointer;transition:all 0.3s;background:#111115;margin-bottom:16px}
+.upload-area:hover,.upload-area.drag-over{border-color:#6c63ff;background:#16161e}
+.upload-area .icon{font-size:2.5rem;margin-bottom:12px}
+.upload-area h3{font-size:1rem;color:#ccc;margin-bottom:6px}
+.upload-area p{font-size:0.8rem;color:#666}
+#fileInput{display:none}
+.video-container{position:relative;background:#000;border-radius:12px;overflow:hidden;margin-bottom:12px;aspect-ratio:16/9}
+video{width:100%;height:100%;object-fit:contain}
+.controls{background:#111115;border-radius:12px;padding:12px;margin-bottom:12px}
+.progress-wrap{position:relative;height:40px;cursor:pointer;margin-bottom:8px}
+.progress-bg{position:absolute;top:50%;transform:translateY(-50%);left:0;right:0;height:4px;background:#222;border-radius:2px}
+.progress-bar{height:100%;background:#6c63ff;border-radius:2px;pointer-events:none}
+.trim-range{position:absolute;top:50%;transform:translateY(-50%);height:4px;background:rgba(108,99,255,0.3);pointer-events:none}
+.thumb{position:absolute;top:50%;transform:translate(-50%,-50%);width:16px;height:16px;border-radius:50%;cursor:grab;touch-action:none;z-index:10}
+.thumb-start{background:#4ade80}
+.thumb-end{background:#f87171}
+.time-labels{display:flex;justify-content:space-between;font-size:0.7rem;color:#666;margin-bottom:8px}
+.btn-row{display:flex;gap:8px;flex-wrap:wrap;justify-content:center}
+btn,.btn{border:none;border-radius:8px;padding:8px 16px;font-size:0.85rem;font-weight:600;cursor:pointer;transition:all 0.2s}
+.btn-play{background:#6c63ff;color:#fff}
+.btn-play:hover{background:#5a52d5}
+.btn-export{background:#4ade80;color:#000}
+.btn-export:hover{background:#22c55e}
+.btn-export:disabled{background:#333;color:#666;cursor:not-allowed}
+.btn-reset{background:#333;color:#ccc}
+.info-bar{display:flex;gap:12px;flex-wrap:wrap;font-size:0.75rem;color:#888;margin-bottom:8px}
+.info-bar span{background:#1a1a22;padding:4px 8px;border-radius:6px}
+.progress-modal{display:none;position:fixed;inset:0;background:rgba(0,0,0,0.85);z-index:100;align-items:center;justify-content:center}
+.progress-modal.show{display:flex}
+.progress-card{background:#16161e;border-radius:16px;padding:28px;min-width:280px;max-width:360px;text-align:center}
+.progress-card h3{margin-bottom:16px;font-size:1rem}
+.prog-bar-wrap{background:#222;border-radius:8px;height:8px;margin-bottom:12px;overflow:hidden}
+.prog-bar-fill{height:100%;background:#6c63ff;border-radius:8px;transition:width 0.3s}
+.prog-label{font-size:0.8rem;color:#888}
+.seg-list{margin-top:12px;text-align:left;font-size:0.75rem;color:#aaa;max-height:120px;overflow-y:auto}
+.seg-item{padding:4px 0;border-bottom:1px solid #222}
+.seg-item.done{color:#4ade80}
+.seg-item.fail{color:#f87171}
+</style>
+</head>
+<body>
+<div class="container">
+  <div class="header">
+    <h1>🎬 影片剪輯導出</h1>
+    <p>iOS Safari 簡單分段導出，每段 ≤ 300 MB</p>
+  </div>
+  <div class="upload-area" id="uploadArea">
+    <div class="icon">📹</div>
+    <h3>點擊選擇或拖擅影片</h3>
+    <p>MP4 / MOV / WebM</p>
+    <input type="file" id="fileInput" accept="video/*">
+  </div>
+  <div id="playerSection" style="display:none">
+    <div class="video-container">
+      <video id="video" playsinline webkit-playsinline preload="metadata"></video>
+    </div>
+    <div class="info-bar" id="infoBar"></div>
+    <div class="controls">
+      <div class="progress-wrap" id="progressWrap">
+        <div class="progress-bg">
+          <div class="progress-bar" id="progressBar"></div>
+        </div>
+        <div class="trim-range" id="trimRange"></div>
+        <div class="thumb thumb-start" id="thumbStart" title="剩首"></div>
+        <div class="thumb thumb-end" id="thumbEnd" title="剪尾"></div>
+      </div>
+      <div class="time-labels">
+        <span id="lblStart">00:00.000</span>
+        <span id="lblCurrent">00:00.000</span>
+        <span id="lblEnd">00:00.000</span>
+      </div>
+      <div class="btn-row">
+        <button class="btn btn-play" id="btnPlay">▶️ 播放</button>
+        <button class="btn btn-reset" id="btnSetStart">✂️ 設入點</button>
+        <button class="btn btn-reset" id="btnSetEnd">✂️ 設出點</button>
+        <button class="btn btn-export" id="btnExport">💾 導出剪輯</button>
+      </div>
+    </div>
+  </div>
+</div>
+<div class="progress-modal" id="progressModal">
+  <div class="progress-card">
+    <h3 id="modalTitle">導出中...</h3>
+    <div class="prog-bar-wrap"><div class="prog-bar-fill" id="progBarFill"></div></div>
+    <div class="prog-label" id="progLabel">嘗計算中</div>
+    <div class="seg-list" id="segList"></div>
+  </div>
+</div>
+<meta name="theme-color" content="#0a0a0c">
+<title>影片播放器</title>
+<script>
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('./sw.js', { scope: './' })
+    .catch(err => console.warn('SW:', err));
+}
+</script>
+<script>
+// ===== MP4 Box Parser =====
+function readU32(buf, off){ const d=new DataView(buf); return d.getUint32(off,false); }
+function readU64(buf, off){ const d=new DataView(buf); return d.getUint32(off,false)*4294967296+d.getUint32(off+4,false); }
+function writeU32(arr, off, v){ arr[off]=(v>>>24)&0xff;arr[off+1]=(v>>>16)&0xff;arr[off+2]=(v>>>8)&0xff;arr[off+3]=v&0xff; }
+function boxType(buf, off){ return String.fromCharCode(buf[off+4],buf[off+5],buf[off+6],buf[off+7]); }
+function boxSize(buf, off){
+  const s=readU32(buf,off);
+  if(s===1) return readU64(buf,off+8);
+  return s;
+}
+
+function parseBoxes(buf, start, end){
+  const boxes=[];
+  let off=start;
+  while(off<end-7){
+    const s=boxSize(buf,off);
+    if(s<8||off+s>end) break;
+    const t=boxType(buf,off);
+    boxes.push({type:t,start:off,size:s});
+    off+=s;
+  }
+  return boxes;
+}
+
+function findBox(buf, path, start, end){
+  let boxes=parseBoxes(buf,start,end);
+  for(let i=0;i<path.length;i++){
+    const b=boxes.find(x=>x.type===path[i]);
+    if(!b) return null;
+    if(i===path.length-1) return b;
+    boxes=parseBoxes(buf,b.start+8,b.start+b.size);
+  }
+  return null;
+}
+
+// ===== State =====
+let gFile=null, gBuf=null, gDur=0;
+let trimStart=0, trimEnd=0;
+let isDragging=null;
+
+const video=document.getElementById('video');
+const uploadArea=document.getElementById('uploadArea');
+const fileInput=document.getElementById('fileInput');
+const playerSection=document.getElementById('playerSection');
+const progressWrap=document.getElementById('progressWrap');
+const progressBar=document.getElementById('progressBar');
+const trimRange=document.getElementById('trimRange');
+const thumbStart=document.getElementById('thumbStart');
+const thumbEnd=document.getElementById('thumbEnd');
+const lblStart=document.getElementById('lblStart');
+const lblEnd=document.getElementById('lblEnd');
+const lblCurrent=document.getElementById('lblCurrent');
+const infoBar=document.getElementById('infoBar');
+const btnPlay=document.getElementById('btnPlay');
+const btnSetStart=document.getElementById('btnSetStart');
+const btnSetEnd=document.getElementById('btnSetEnd');
+const btnExport=document.getElementById('btnExport');
+const progressModal=document.getElementById('progressModal');
+const progBarFill=document.getElementById('progBarFill');
+const progLabel=document.getElementById('progLabel');
+const segList=document.getElementById('segList');
+const modalTitle=document.getElementById('modalTitle');
+
+function fmt(s){
+  const m=Math.floor(s/60);
+  const sec=(s%60).toFixed(3).padStart(6,'0');
+  return m.toString().padStart(2,'0')+':'+sec;
+}
+
+function updateThumbsUI(){
+  const dur=gDur||1;
+  const sp=trimStart/dur*100;
+  const ep=trimEnd/dur*100;
+  thumbStart.style.left=sp+'%';
+  thumbEnd.style.left=ep+'%';
+  trimRange.style.left=sp+'%';
+  trimRange.style.width=(ep-sp)+'%';
+  lblStart.textContent=fmt(trimStart);
+  lblEnd.textContent=fmt(trimEnd);
+}
+
+// ===== File Load =====
+uploadArea.addEventListener('click',()=>fileInput.click());
+fileInput.addEventListener('change',e=>loadFile(e.target.files[0]));
+uploadArea.addEventListener('dragover',e=>{e.preventDefault();uploadArea.classList.add('drag-over');});
+uploadArea.addEventListener('dragleave',()=>uploadArea.classList.remove('drag-over'));
+uploadArea.addEventListener('drop',e=>{e.preventDefault();uploadArea.classList.remove('drag-over');if(e.dataTransfer.files[0]) loadFile(e.dataTransfer.files[0]);});
+
+function loadFile(f){
+  if(!f) return;
+  gFile=f;
+  const url=URL.createObjectURL(f);
+  video.src=url;
+  video.load();
+  video.onloadedmetadata=async()=>{
+    gDur=video.duration;
+    trimStart=0; trimEnd=gDur;
+    updateThumbsUI();
+    uploadArea.style.display='none';
+    playerSection.style.display='';
+    // Read into buffer for export
+    progLabel.textContent='讀取檔案中...';
+    const reader=new FileReader();
+    reader.onload=e=>{
+      gBuf=new Uint8Array(e.target.result);
+      showInfo();
+    };
+    reader.readAsArrayBuffer(f);
+  };
+}
+
+function showInfo(){
+  const mb=(gFile.size/1048576).toFixed(1);
+  infoBar.innerHTML=`<span>📁 ${gFile.name}</span><span>💾 ${mb} MB</span><span>⏱️ ${fmt(gDur)}</span>`;
+}
+
+// ===== Playback =====
+video.addEventListener('timeupdate',()=>{
+  if(!gDur) return;
+  const p=video.currentTime/gDur*100;
+  progressBar.style.width=p+'%';
+  lblCurrent.textContent=fmt(video.currentTime);
+  if(video.currentTime>=trimEnd) video.pause();
+});
+
+progressWrap.addEventListener('click',e=>{
+  if(isDragging) return;
+  const rect=progressWrap.getBoundingClientRect();
+  const p=(e.clientX-rect.left)/rect.width;
+  video.currentTime=p*gDur;
+});
+
+btnPlay.addEventListener('click',()=>{
+  if(video.paused){
+    if(video.currentTime<trimStart||video.currentTime>=trimEnd) video.currentTime=trimStart;
+    video.play(); btnPlay.textContent='⏸️ 暫停';
+  } else {
+    video.pause(); btnPlay.textContent='▶️ 播放';
+  }
+});
+video.addEventListener('pause',()=>btnPlay.textContent='▶️ 播放');
+video.addEventListener('play',()=>btnPlay.textContent='⏸️ 暫停');
+
+btnSetStart.addEventListener('click',()=>{
+  trimStart=Math.min(video.currentTime,trimEnd-0.1);
+  updateThumbsUI();
+});
+btnSetEnd.addEventListener('click',()=>{
+  trimEnd=Math.max(video.currentTime,trimStart+0.1);
+  updateThumbsUI();
+});
+
+// ===== Thumb drag =====
+function startDrag(thumb,e){
+  isDragging=thumb;
+  e.preventDefault();
+}
+thumbStart.addEventListener('mousedown',e=>startDrag('start',e));
+thumbEnd.addEventListener('mousedown',e=>startDrag('end',e));
+thumbStart.addEventListener('touchstart',e=>startDrag('start',e),{passive:false});
+thumbEnd.addEventListener('touchstart',e=>startDrag('end',e),{passive:false});
+
+function getDragPos(e){
+  const rect=progressWrap.getBoundingClientRect();
+  const clientX=e.touches?e.touches[0].clientX:e.clientX;
+  return Math.max(0,Math.min(1,(clientX-rect.left)/rect.width));
+}
+document.addEventListener('mousemove',e=>{
+  if(!isDragging) return;
+  const p=getDragPos(e);
+  if(isDragging==='start'){ trimStart=Math.min(p*gDur,trimEnd-0.1); }
+  else { trimEnd=Math.max(p*gDur,trimStart+0.1); }
+  updateThumbsUI();
+});
+document.addEventListener('touchmove',e=>{
+  if(!isDragging) return;
+  const p=getDragPos(e);
+  if(isDragging==='start'){ trimStart=Math.min(p*gDur,trimEnd-0.1); }
+  else { trimEnd=Math.max(p*gDur,trimStart+0.1); }
+  updateThumbsUI();
+},{passive:true});
+document.addEventListener('mouseup',()=>isDragging=null);
+document.addEventListener('touchend',()=>isDragging=null);
+
+// ===== MP4 Segment Export Core =====
+const MAX_SEG_BYTES = 300 * 1024 * 1024; // 300 MB per segment
+
+async function exportTrimmed(){
+  if(!gBuf){ alert('檔案尚未讀取完成，請稍候'); return; }
+  btnExport.disabled=true;
+  progressModal.classList.add('show');
+  modalTitle.textContent='分析 MP4 結構...';
+  progBarFill.style.width='0%';
+  segList.innerHTML='';
+
+  try {
+    const buf=gBuf;
+    const len=buf.length;
+
+    // Find moov and mdat
+    const topBoxes=parseBoxes(buf,0,len);
+    const moovBox=topBoxes.find(b=>b.type==='moov');
+    const mdatBox=topBoxes.find(b=>b.type==='mdat');
+    if(!moovBox||!mdatBox) throw new Error('找不到 moov 或 mdat box');
+
+    // Parse tracks
+    const moovStart=moovBox.start, moovEnd=moovBox.start+moovBox.size;
+    const trakBoxes=parseBoxes(buf,moovStart+8,moovEnd).filter(b=>b.type==='trak');
+
+    let tracks=[];
+    for(const trak of trakBoxes){
+      const t=parseTrak(buf,trak);
+      if(t) tracks.push(t);
+    }
+    if(!tracks.length) throw new Error('找不到軌道');
+
+    // Find video track for keyframes
+    const vTrack=tracks.find(t=>t.isVideo)||tracks[0];
+    const timeScale=vTrack.timeScale;
+
+    // Convert trim times to track timescale
+    const startTick=Math.round(trimStart*timeScale);
+    const endTick=Math.round(trimEnd*timeScale);
+
+    // Find sample range
+    const allSamples=vTrack.samples;
+    let si=allSamples.findIndex(s=>s.dts>=startTick);
+    if(si<0) si=0;
+    // Snap to previous keyframe
+    while(si>0 && !allSamples[si].isKey) si--;
+    let ei=allSamples.findIndex(s=>s.dts>=endTick);
+    if(ei<0) ei=allSamples.length;
+
+    const trimmedSamples=allSamples.slice(si,ei);
+    if(!trimmedSamples.length) throw new Error('該範圍內沒有樣本');
+
+    // Calculate actual byte size of trimmed range
+    const totalBytes=trimmedSamples.reduce((s,x)=>s+x.size,0);
+    const moovSize=moovBox.size;
+    const estTotal=moovSize+8+totalBytes;
+
+    // Determine number of segments
+    const numSegs=Math.max(1,Math.ceil(estTotal/MAX_SEG_BYTES));
+    modalTitle.textContent=`導出 ${numSegs} 個分段...`;
+
+    // Split samples into segments (by keyframe boundaries)
+    const segSampleSets=splitIntoSegments(trimmedSamples, numSegs);
+
+    const baseName=gFile.name.replace(/\.[^.]+$/,'');
+
+    for(let segIdx=0;segIdx<segSampleSets.length;segIdx++){
+      const segSamples=segSampleSets[segIdx];
+      const label=segSampleSets.length>1
+        ? `${baseName}_part${segIdx+1}of${segSampleSets.length}.mp4`
+        : `${baseName}_trim.mp4`;
+
+      const li=document.createElement('div');
+      li.className='seg-item';
+      li.textContent=`• ${label} 導出中...`;
+      segList.appendChild(li);
+
+      progLabel.textContent=`分段 ${segIdx+1}/${segSampleSets.length}: ${label}`;
+      progBarFill.style.width=Math.round((segIdx/segSampleSets.length)*100)+'%';
+
+      try {
+        const mp4=await buildMp4(buf, tracks, moovBox, segSamples, mdatBox.start);
+        const blob=new Blob([mp4],{type:'video/mp4'});
+        triggerDownload(blob, label);
+        li.className='seg-item done';
+        li.textContent=`✓ ${label} (${(blob.size/1048576).toFixed(1)} MB)`;
+        // Small delay between downloads for iOS
+        if(segIdx<segSampleSets.length-1) await sleep(800);
+      } catch(e){
+        li.className='seg-item fail';
+        li.textContent=`✗ ${label}: ${e.message}`;
+      }
+    }
+
+    progBarFill.style.width='100%';
+    progLabel.textContent='導出完成!';
+    modalTitle.textContent='完成 ✅';
+    setTimeout(()=>progressModal.classList.remove('show'),3000);
+
+  } catch(err){
+    alert('導出失敗: '+err.message);
+    progressModal.classList.remove('show');
+  } finally {
+    btnExport.disabled=false;
+  }
+}
+
+function sleep(ms){ return new Promise(r=>setTimeout(r,ms)); }
+
+function splitIntoSegments(samples, numSegs){
+  if(numSegs<=1) return [samples];
+  const segs=[];
+  const perSeg=Math.ceil(samples.length/numSegs);
+  let i=0;
+  while(i<samples.length){
+    let end=Math.min(i+perSeg, samples.length);
+    // Extend to next keyframe boundary
+    while(end<samples.length && !samples[end].isKey) end++;
+    segs.push(samples.slice(i,end));
+    i=end;
+  }
+  return segs.filter(s=>s.length>0);
+}
+
+function triggerDownload(blob, name){
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a');
+  a.href=url; a.download=name;
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(()=>{ URL.revokeObjectURL(url); a.remove(); },5000);
+}
+
+// ===== Parse Track =====
+function parseTrak(buf, trakBox){
+  const ts=trakBox.start, te=ts+trakBox.size;
+  const mdiaBox=findBox(buf,['mdia'],ts+8,te);
+  if(!mdiaBox) return null;
+  const ms=mdiaBox.start, me=ms+mdiaBox.size;
+
+  // timescale
+  const mdhdBox=findBox(buf,['mdhd'],ms+8,me);
+  if(!mdhdBox) return null;
+  const version=buf[mdhdBox.start+8];
+  const timeScale=version===1
+    ? readU32(buf,mdhdBox.start+28)
+    : readU32(buf,mdhdBox.start+20);
+
+  // hdlr for type
+  const hdlrBox=findBox(buf,['hdlr'],ms+8,me);
+  const handlerType=hdlrBox?String.fromCharCode(buf[hdlrBox.start+16],buf[hdlrBox.start+17],buf[hdlrBox.start+18],buf[hdlrBox.start+19]):'';
+  const isVideo=handlerType==='vide';
+
+  // stbl
+  const stblBox=findBox(buf,['minf','stbl'],ms+8,me);
+  if(!stblBox) return null;
+  const ss=stblBox.start, se2=ss+stblBox.size;
+
+  // stts -> DTS
+  const sttsBox=findBox(buf,['stts'],ss+8,se2);
+  if(!sttsBox) return null;
+  const dtsArr=decodeSampleTimes(buf,sttsBox);
+
+  // ctts -> CTS offset (optional)
+  const cttsBox=findBox(buf,['ctts'],ss+8,se2);
+  const ctsArr=cttsBox?decodeCTTS(buf,cttsBox):null;
+
+  // stss -> keyframes (optional, if absent all are key)
+  const stssBox=findBox(buf,['stss'],ss+8,se2);
+  const keySet=stssBox?decodeSTSS(buf,stssBox):null;
+
+  // stsz -> sample sizes
+  const stszBox=findBox(buf,['stsz'],ss+8,se2);
+  if(!stszBox) return null;
+  const sizes=decodeSTSZ(buf,stszBox);
+
+  // stco/co64 -> chunk offsets
+  const stcoBox=findBox(buf,['stco'],ss+8,se2);
+  const co64Box=findBox(buf,['co64'],ss+8,se2);
+  const chunkOffsets=stcoBox?decodeSTCO(buf,stcoBox):decodeCO64(buf,co64Box);
+
+  // stsc -> sample-to-chunk
+  const stscBox=findBox(buf,['stsc'],ss+8,se2);
+  if(!stscBox) return null;
+  const stscEntries=decodeSTSC(buf,stscBox);
+
+  // Build sample list
+  const samples=buildSamples(dtsArr,ctsArr,sizes,chunkOffsets,stscEntries,keySet);
+
+  return {trakBox,isVideo,timeScale,samples,
+    stblBox,sttsBox,cttsBox,stssBox,stszBox,stcoBox:stcoBox||co64Box,stscBox,
+    mdhdBox,timeScaleVal:timeScale};
+}
+
+function decodeSampleTimes(buf,box){
+  const d=new DataView(buf.buffer,buf.byteOffset);
+  const count=d.getUint32(box.start+12,false);
+  const arr=[];
+  let dts=0;
+  for(let i=0;i<count;i++){
+    const sampleCount=d.getUint32(box.start+16+i*8,false);
+    const delta=d.getUint32(box.start+20+i*8,false);
+    for(let j=0;j<sampleCount;j++){ arr.push(dts); dts+=delta; }
+  }
+  return arr;
+}
+
+function decodeCTTS(buf,box){
+  const d=new DataView(buf.buffer,buf.byteOffset);
+  const count=d.getUint32(box.start+12,false);
+  const arr=[];
+  for(let i=0;i<count;i++){
+    const sampleCount=d.getUint32(box.start+16+i*8,false);
+    const offset=d.getInt32(box.start+20+i*8,false);
+    for(let j=0;j<sampleCount;j++) arr.push(offset);
+  }
+  return arr;
+}
+
+function decodeSTSS(buf,box){
+  const d=new DataView(buf.buffer,buf.byteOffset);
+  const count=d.getUint32(box.start+12,false);
+  const set=new Set();
+  for(let i=0;i<count;i++) set.add(d.getUint32(box.start+16+i*4,false)-1); // 0-indexed
+  return set;
+}
+
+function decodeSTSZ(buf,box){
+  const d=new DataView(buf.buffer,buf.byteOffset);
+  const fixedSize=d.getUint32(box.start+12,false);
+  const count=d.getUint32(box.start+16,false);
+  if(fixedSize>0) return new Array(count).fill(fixedSize);
+  const arr=[];
+  for(let i=0;i<count;i++) arr.push(d.getUint32(box.start+20+i*4,false));
+  return arr;
+}
+
+function decodeSTCO(buf,box){
+  const d=new DataView(buf.buffer,buf.byteOffset);
+  const count=d.getUint32(box.start+12,false);
+  const arr=[];
+  for(let i=0;i<count;i++) arr.push(d.getUint32(box.start+16+i*4,false));
+  return arr;
+}
+
+function decodeCO64(buf,box){
+  const d=new DataView(buf.buffer,buf.byteOffset);
+  const count=d.getUint32(box.start+12,false);
+  const arr=[];
+  for(let i=0;i<count;i++) arr.push(readU64(buf,box.start+16+i*8));
+  return arr;
+}
+
+function decodeSTSC(buf,box){
+  const d=new DataView(buf.buffer,buf.byteOffset);
+  const count=d.getUint32(box.start+12,false);
+  const arr=[];
+  for(let i=0;i<count;i++){
+    arr.push({
+      firstChunk:d.getUint32(box.start+16+i*12,false),
+      samplesPerChunk:d.getUint32(box.start+20+i*12,false),
+      sdIndex:d.getUint32(box.start+24+i*12,false)
+    });
+  }
+  return arr;
+}
+
+function buildSamples(dtsArr,ctsArr,sizes,chunkOffsets,stscEntries,keySet){
+  const n=sizes.length;
+  const samples=[];
+  let si=0;
+  const numChunks=chunkOffsets.length;
+  for(let ci=0;ci<numChunks&&si<n;ci++){
+    const chunkIdx=ci+1; // 1-indexed
+    // find samplesPerChunk for this chunk
+    let spc=1;
+    for(let e=0;e<stscEntries.length;e++){
+      if(stscEntries[e].firstChunk<=chunkIdx){
+        spc=stscEntries[e].samplesPerChunk;
+      } else break;
+    }
+    let offset=chunkOffsets[ci];
+    for(let k=0;k<spc&&si<n;k++,si++){
+      samples.push({
+        idx:si,
+        dts:dtsArr[si]||0,
+        cts:ctsArr?ctsArr[si]||0:0,
+        size:sizes[si],
+        offset:offset,
+        isKey:keySet?keySet.has(si):true
+      });
+      offset+=sizes[si];
+    }
+  }
+  return samples;
+}
+
+// ===== Build MP4 =====
+async function buildMp4(buf, tracks, moovBox, segSamples, mdatFileOffset){
+  // 1. Collect mdat bytes for this segment
+  const parts=[]; let mdatBytes=0;
+  for(const s of segSamples){
+    parts.push(buf.slice(s.offset, s.offset+s.size));
+    mdatBytes+=s.size;
+  }
+
+  // 2. Build new moov
+  const firstDts=segSamples[0].dts;
+
+  // Copy entire original moov as base, then patch in-place
+  const origMoov=buf.slice(moovBox.start, moovBox.start+moovBox.size);
+  const newMoov=new Uint8Array(origMoov); // mutable copy
+
+  // For each track, rebuild stts/ctts/stss/stsz/stsc/stco inside the moov copy
+  // We find each trak box relative offset inside moov copy and patch stbl
+  const moovStart=moovBox.start;
+
+  for(const track of tracks){
+    const trakRel=track.trakBox.start-moovStart;
+    const trakSize=track.trakBox.size;
+
+    // Get track samples in this segment (by dts range)
+    const segFirst=segSamples[0].dts;
+    const segLast=segSamples[segSamples.length-1].dts;
+
+    // For audio/other tracks, include all samples that fall within the same time range
+    let tSamples;
+    if(track.isVideo){
+      tSamples=segSamples;
+    } else {
+      // Audio: match by DTS ratio
+      const ratio=track.timeScale/(tracks.find(t=>t.isVideo)||track).timeScale;
+      const aStart=Math.round(segFirst*ratio);
+      const aEnd=Math.round(segLast*ratio)+1;
+      tSamples=track.samples.filter(s=>s.dts>=aStart&&s.dts<=aEnd);
+      if(!tSamples.length) tSamples=track.samples;
+    }
+
+    // Collect audio mdat parts too (for non-video tracks)
+    if(!track.isVideo){
+      for(const s of tSamples){
+        parts.push(buf.slice(s.offset,s.offset+s.size));
+        mdatBytes+=s.size;
+      }
+    }
+
+    // Build new stbl boxes
+    patchStbl(newMoov, trakRel+8, trakSize-8, moovStart, tSamples, track, 8+moovBox.size);
+  }
+
+  // 3. Patch stco offsets: moov size + 8 (ftyp-like header) = new mdat start
+  // We already computed offsets inside patchStbl
+
+  // 4. Assemble ftyp + moov + mdat
+  const ftyp=buildFtyp();
+  const mdatHeader=new Uint8Array(8);
+  writeU32(mdatHeader,0,mdatBytes+8);
+  mdatHeader[4]=0x6d;mdatHeader[5]=0x64;mdatHeader[6]=0x61;mdatHeader[7]=0x74; // 'mdat'
+
+  const totalSize=ftyp.length+newMoov.length+8+mdatBytes;
+  const out=new Uint8Array(totalSize);
+  let pos=0;
+  out.set(ftyp,pos); pos+=ftyp.length;
+  out.set(newMoov,pos); pos+=newMoov.length;
+  out.set(mdatHeader,pos); pos+=8;
+  for(const p of parts){ out.set(p,pos); pos+=p.length; }
+  return out;
+}
+
+function buildFtyp(){
+  // ftyp box: isom/mp42
+  const b=new Uint8Array(24);
+  writeU32(b,0,24);
+  b[4]=0x66;b[5]=0x74;b[6]=0x79;b[7]=0x70; // ftyp
+  b[8]=0x69;b[9]=0x73;b[10]=0x6f;b[11]=0x6d; // isom
+  b[12]=0;b[13]=0;b[14]=0;b[15]=0; // version 0
+  b[16]=0x69;b[17]=0x73;b[18]=0x6f;b[19]=0x6d; // isom
+  b[20]=0x6d;b[21]=0x70;b[22]=0x34;b[23]=0x32; // mp42
+  return b;
+}
+
+function patchStbl(moovBuf, trakRelStart, trakRelSize, moovAbsStart, tSamples, track, mdatStart){
+  // Find stbl inside moov copy using relative offsets
+  const trakStart=trakRelStart;
+  const trakEnd=trakRelStart+trakRelSize;
+
+  // Find stbl (via mdia>minf>stbl)
+  function findRelBox(b, path, s, e){
+    let boxes=parseBoxes(b,s,e);
+    for(let i=0;i<path.length;i++){
+      const bx=boxes.find(x=>x.type===path[i]);
+      if(!bx) return null;
+      if(i===path.length-1) return bx;
+      boxes=parseBoxes(b,bx.start+8,bx.start+bx.size);
+    }
+    return null;
+  }
+
+  // We operate on the moovBuf which is offset from moovAbsStart=0 in our copy
+  // trakRelStart is relative to start of moovBuf
+  const stbl=findRelBox(moovBuf,['mdia','minf','stbl'],trakStart,trakEnd);
+  if(!stbl) return;
+
+  const ss=stbl.start, se=ss+stbl.size;
+
+  // Build and splice new stts
+  const newStts=buildStts(tSamples);
+  spliceBox(moovBuf,ss,se,'stts',newStts);
+
+  // Build and splice new stsz
+  const newStsz=buildStsz(tSamples);
+  spliceBox(moovBuf,ss,se,'stsz',newStsz);
+
+  // Build and splice new stsc (1 chunk per sample for simplicity)
+  const newStsc=buildStscFlat(tSamples.length);
+  spliceBox(moovBuf,ss,se,'stsc',newStsc);
+
+  // Build and splice new stco
+  // mdat data starts at mdatStart
+  const newStco=buildStcoForSamples(tSamples, mdatStart);
+  spliceBox(moovBuf,ss,se,'stco',newStco);
+
+  // ctts if present
+  if(track.cttsBox){
+    const newCtts=buildCtts(tSamples);
+    spliceBox(moovBuf,ss,se,'ctts',newCtts);
+  }
+
+  // stss if present
+  if(track.stssBox){
+    const newStss=buildStss(tSamples);
+    spliceBox(moovBuf,ss,se,'stss',newStss);
+  }
+}
+
+// NOTE: spliceBox is complex due to fixed buffer - instead we rebuild entire stbl
+// Simplified approach: don't splice, just patch size fields and zero out entries
+// For reliability, use a flat structure approach
+
+function spliceBox(moovBuf, stblStart, stblEnd, type, newData){
+  // Find existing box and overwrite. If new is smaller, pad with free box.
+  const boxes=parseBoxes(moovBuf, stblStart+8, stblEnd);
+  const existing=boxes.find(b=>b.type===type);
+  if(!existing) return;
+  // Overwrite with new data (assume same size or truncate)
+  const copyLen=Math.min(newData.length, existing.size);
+  moovBuf.set(newData.subarray(0,copyLen), existing.start);
+  // If shorter, fill remainder as free box
+  if(newData.length<existing.size){
+    const freeSize=existing.size-newData.length;
+    const free=new Uint8Array(freeSize);
+    writeU32(free,0,freeSize);
+    free[4]=0x66;free[5]=0x72;free[6]=0x65;free[7]=0x65; // free
+    moovBuf.set(free, existing.start+newData.length);
+  }
+}
+
+function buildStts(samples){
+  // Build run-length encoded stts
+  const runs=[];
+  if(!samples.length) return buildFullBox('stts',new Uint8Array(4));
+  let prevDelta=0, runCount=0;
+  for(let i=0;i<samples.length;i++){
+    const delta=i<samples.length-1?samples[i+1].dts-samples[i].dts:prevDelta||1;
+    if(runCount===0||delta!==prevDelta){
+      if(runCount>0) runs.push({count:runCount,delta:prevDelta});
+      prevDelta=delta; runCount=1;
+    } else { runCount++; }
+  }
+  if(runCount>0) runs.push({count:runCount,delta:prevDelta});
+  const body=new Uint8Array(4+runs.length*8);
+  writeU32(body,0,runs.length);
+  runs.forEach((r,i)=>{ writeU32(body,4+i*8,r.count); writeU32(body,8+i*8,r.delta); });
+  return buildFullBox('stts',body);
+}
+
+function buildCtts(samples){
+  const runs=[];
+  let prevCts=samples[0].cts, runCount=0;
+  for(const s of samples){
+    if(s.cts!==prevCts){ runs.push({count:runCount,offset:prevCts}); prevCts=s.cts; runCount=1; }
+    else runCount++;
+  }
+  runs.push({count:runCount,offset:prevCts});
+  const body=new Uint8Array(4+runs.length*8);
+  writeU32(body,0,runs.length);
+  runs.forEach((r,i)=>{ writeU32(body,4+i*8,r.count); writeU32(body,8+i*8,r.offset); });
+  return buildFullBox('ctts',body);
+}
+
+function buildStss(samples){
+  const keys=samples.map((s,i)=>({i,isKey:s.isKey})).filter(x=>x.isKey);
+  const body=new Uint8Array(4+keys.length*4);
+  writeU32(body,0,keys.length);
+  keys.forEach((k,i)=>writeU32(body,4+i*4,k.i+1));
+  return buildFullBox('stss',body);
+}
+
+function buildStsz(samples){
+  const body=new Uint8Array(8+samples.length*4);
+  writeU32(body,0,0); // uniform size = 0 (variable)
+  writeU32(body,4,samples.length);
+  samples.forEach((s,i)=>writeU32(body,8+i*4,s.size));
+  return buildFullBox('stsz',body);
+}
+
+function buildStscFlat(numSamples){
+  // 1 sample per chunk
+  const body=new Uint8Array(4+12);
+  writeU32(body,0,1);
+  writeU32(body,4,1); // firstChunk=1
+  writeU32(body,8,1); // samplesPerChunk=1
+  writeU32(body,12,1); // sdIndex=1
+  return buildFullBox('stsc',body);
+}
+
+function buildStcoForSamples(samples, mdatDataStart){
+  // Each sample is its own chunk, calculate offset from mdat data start
+  const body=new Uint8Array(4+samples.length*4);
+  writeU32(body,0,samples.length);
+  // mdatDataStart is relative to start of output file, which is ftyp+moov+8(mdat header)
+  // We need to compute cumulative offsets
+  // But we don't know final moov size here - use placeholder
+  // Actual offsets will be: mdatDataStart + cumulative byte offsets of video samples only
+  // For this simplified version, we track video samples separately
+  let offset=mdatDataStart;
+  samples.forEach((s,i)=>{
+    writeU32(body,4+i*4,offset);
+    offset+=s.size;
+  });
+  return buildFullBox('stco',body);
+}
+
+function buildFullBox(type, body){
+  const size=12+body.length;
+  const box=new Uint8Array(size);
+  writeU32(box,0,size);
+  box[4]=type.charCodeAt(0);box[5]=type.charCodeAt(1);
+  box[6]=type.charCodeAt(2);box[7]=type.charCodeAt(3);
+  // version=0, flags=0 (bytes 8-11)
+  box.set(body,12);
+  return box;
+}
+
+btnExport.addEventListener('click', exportTrimmed);
+</script>
+</body>
+</html>
