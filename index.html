@@ -1975,6 +1975,19 @@ async function trimMp4(file, startSec, endSec, onProgress) {
   }
   patchStco(nmv,newMoovBox,8,newMoovBox.byteLength);
 
+  /* debug: show stco first values per track */
+  {
+    const dbgLines = [];
+    tracks.forEach((tr,ti)=>{
+      if(tr._first===undefined) return;
+      const offs = newChunkOffsets[ti];
+      dbgLines.push(`T${ti} stco[0]_rel=${offs[0]} stco[last]_rel=${offs[offs.length-1]} n=${offs.length}`);
+    });
+    dbgLines.push(`mdatAbsStart=${ftypBox.byteLength+newMoovBox.byteLength+8}`);
+    exportStatus.textContent = dbgLines.join(' | ');
+    await new Promise(r=>setTimeout(r,10000));
+  }
+
   /* ── return structured parts — caller handles chunked download ── */
   onProgress(0.93,'組合輸出…');
   const mdatHeader=new Uint8Array(8);
