@@ -459,8 +459,9 @@
     transition: all 0.25s; z-index: 9999; white-space: nowrap;
   }
   #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+</style>
 
-  /* iOS file-pic
+<script>
 /* Register Service Worker for COI headers (SharedArrayBuffer support) */
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('./sw.js', { scope: './' })
@@ -474,7 +475,7 @@ if ('serviceWorker' in navigator) {
 <div id="upload-screen">
   <div class="logo">Video Frame Player</div>
   <div class="upload-zone">
-    <input type="file" id="file-input" accept="video/*" style="position:absolute;inset:0;width:100%;height:100%;opacity:0;cursor:pointer;z-index:10;font-size:16px;">
+    <input type="file" id="file-input" accept="video/*">
     <div class="upload-icon">
       <svg viewBox="0 0 24 24" fill="none" stroke-width="1.8">
         <path d="M15 10l4.553-2.276A1 1 0 0121 8.723v6.554a1 1 0 01-1.447.894L15 14M3 8a2 2 0 012-2h10a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V8z"/>
@@ -838,11 +839,8 @@ document.body.appendChild(changeInput);
 fileInput.addEventListener('change', e => {
   const f = e.target.files && e.target.files[0];
   if (!f) return;
-  // Hide upload screen immediately on same tick as user gesture
-  uploadScreen.style.display = 'none';
-  playerScreen.style.display = 'block';
+  fileInput.value = '';
   loadVideoFile(f);
-  try { fileInput.value = ''; } catch(_) {}
 });
 changeInput.addEventListener('change', e => {
   const f = e.target.files && e.target.files[0];
@@ -855,9 +853,6 @@ document.getElementById('change-video-btn').addEventListener('click', e => {
 });
 
 function loadVideoFile(file) {
-  if (!file) return;
-  // Switch screen immediately (synchronous) so iOS doesn't revert
-  /* screen already switched above */
   stopFrameMode();
   video.pause();
   isPlaying = false; setPlayIcon(false);
@@ -884,7 +879,8 @@ function loadVideoFile(file) {
     showToast('無法開啟檔案'); return;
   }
 
-  /* screen already switched above */
+  uploadScreen.style.display = 'none';
+  playerScreen.style.display = 'block';
   showPanel();
   requestWakeLock();
 
@@ -2569,24 +2565,22 @@ document.getElementById('loop-convert').addEventListener('click', async e => {
 
 
 
-/* iOS file picker: temporarily lift position:fixed to prevent page reset */
-fileInput.addEventListener('click', () => {
-  document.documentElement.classList.add('picking');
-});
-fileInput.addEventListener('change', () => {
-  setTimeout(() => document.documentElement.classList.remove('picking'), 300);
-});
-fileInput.addEventListener('cancel', () => {
-  setTimeout(() => document.documentElement.classList.remove('picking'), 300);
-});
-removeChild(a);
-    setTimeout(() => URL.revokeObjectURL(url), 3000);
-    showToast(`轉換完成 → ${outExt.toUpperCase()}`);
-  } else {
-    showToast('此格式轉換目前不支援（需 FFmpeg）');
+/* iOS file-picker: temporarily lift position:fixed to prevent page reset */
+(function() {
+  var fi = document.getElementById('file-input');
+  if (!fi) return;
+  fi.addEventListener('click', function() {
+    document.documentElement.classList.add('picking');
+  });
+  function removePicking() {
+    setTimeout(function() {
+      document.documentElement.classList.remove('picking');
+    }, 500);
   }
-});
-
+  fi.addEventListener('change', removePicking);
+  fi.addEventListener('cancel', removePicking);
+  window.addEventListener('focus', removePicking);
+})();
 </script>
 </body>
 </html>
