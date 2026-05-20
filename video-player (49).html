@@ -1,0 +1,2267 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Frame Player">
+<meta name="theme-color" content="#0a0a0c">
+<title>影片播放器</title>
+<script src="https://unpkg.com/@ffmpeg/ffmpeg@0.11.6/dist/ffmpeg.min.js"></script>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@300;400;500&family=Space+Grotesk:wght@300;400;600&display=swap');
+
+  * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+
+  :root {
+    --accent: #c8ff47;
+    --accent2: #47d4ff;
+    --text: #f0f0f4;
+    --muted: #888899;
+  }
+
+  html, body {
+    background: #000;
+    color: var(--text);
+    font-family: 'Space Grotesk', sans-serif;
+    height: 100%;
+    overflow: hidden;
+    position: fixed;
+    width: 100%;
+  }
+
+  /* ══ UPLOAD SCREEN ══ */
+  #upload-screen {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100dvh;
+    gap: 24px;
+    padding: 32px;
+    background: #0a0a0c;
+  }
+  .logo {
+    font-family: 'DM Mono', monospace;
+    font-size: 11px;
+    letter-spacing: 0.3em;
+    color: var(--muted);
+    text-transform: uppercase;
+  }
+  .upload-zone {
+    width: 100%; max-width: 340px;
+    aspect-ratio: 16/10;
+    border: 1.5px dashed rgba(200,255,71,0.3);
+    border-radius: 16px;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    gap: 14px;
+    background: linear-gradient(135deg, rgba(200,255,71,0.03), rgba(71,212,255,0.03));
+    position: relative; overflow: hidden; cursor: pointer;
+    transition: border-color 0.2s, background 0.2s;
+  }
+  .upload-zone:active { border-color: var(--accent); background: rgba(200,255,71,0.07); }
+  .upload-zone::before {
+    content: ''; position: absolute; inset: 0;
+    background: radial-gradient(ellipse at 50% 120%, rgba(200,255,71,0.08) 0%, transparent 60%);
+    pointer-events: none;
+  }
+  .upload-icon {
+    width: 56px; height: 56px; border-radius: 14px;
+    background: rgba(200,255,71,0.1);
+    display: flex; align-items: center; justify-content: center;
+  }
+  .upload-icon svg { width: 28px; height: 28px; stroke: var(--accent); }
+  .upload-text { font-size: 15px; font-weight: 600; }
+  .upload-sub { font-size: 12px; color: var(--muted); font-family: 'DM Mono', monospace; }
+  #file-input {
+    position: absolute; inset: 0; width: 100%; height: 100%;
+    opacity: 0; cursor: pointer; z-index: 10; font-size: 16px;
+  }
+
+  /* ══ PLAYER SCREEN — true fullscreen ══ */
+  #player-screen {
+    display: none;
+    position: fixed; inset: 0;
+    background: #000;
+  }
+
+  #video-container {
+    position: absolute; inset: 0;
+    display: flex; align-items: center; justify-content: center;
+    background: #000;
+    overflow: hidden;
+    touch-action: none;
+  }
+  #video {
+    width: 100%; height: 100%;
+    display: block; object-fit: contain;
+    transform-origin: center center;
+    transition: none;
+    will-change: transform;
+  }
+
+  /* Tap zone over video */
+  #tap-overlay {
+    position: absolute; inset: 0;
+    z-index: 5; cursor: pointer;
+  }
+
+  /* ── Time info top-right ── */
+  #time-overlay {
+    position: absolute;
+    top: max(env(safe-area-inset-top, 0px), 8px);
+    right: 12px;
+    margin-top: 8px;
+    background: transparent;
+    padding: 5px 10px;
+    font-family: 'DM Mono', monospace;
+    font-size: 11px; color: rgba(255,255,255,0.75);
+    letter-spacing: 0.05em;
+    pointer-events: none;
+    line-height: 1.7; text-align: right;
+    z-index: 20;
+    transition: opacity 0.3s;
+  }
+  #time-display { color: rgba(255,255,255,0.85); }
+  #frame-display { color: rgba(255,255,255,0.5); font-size: 10px; }
+  #time-overlay.hidden { opacity: 0; }
+
+  /* ── Mini bar (visible when panel hidden) ── */
+  #mini-bar {
+    position: absolute;
+    bottom: max(env(safe-area-inset-bottom, 0px), 10px);
+    left: 0; right: 0;
+    z-index: 40;
+    display: none;
+    align-items: center;
+    justify-content: space-around;
+    background: transparent;
+    border: none;
+    padding: 6px 24px;
+  }
+  #mini-bar.show { display: flex; }
+
+  .mini-btn {
+    background: transparent;
+    border: none;
+    border-radius: 50%;
+    width: 52px; height: 52px;
+    display: flex; align-items: center; justify-content: center;
+    cursor: pointer;
+    flex-shrink: 0;
+    opacity: 0.7;
+  }
+  .mini-btn svg { width: 24px; height: 24px; stroke: #fff; fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+  .mini-btn:active { opacity: 1; transform: scale(0.88); }
+
+  #mini-play-btn { opacity: 0.85; }
+  #mini-play-btn svg { stroke: #fff; width: 28px; height: 28px; }
+
+  .mini-divider { display: none; }
+
+  #mini-expand {
+    opacity: 0.35;
+    font-size: 16px;
+    color: #fff;
+    padding: 0;
+    width: 44px; height: 44px;
+    display: flex; align-items: center; justify-content: center;
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    line-height: 1;
+    flex-shrink: 0;
+  }
+
+  /* ══ FLOATING CONTROLS PANEL ══ */
+  #controls {
+    position: absolute; left: 0; right: 0; bottom: 0;
+    z-index: 30;
+    background: transparent;
+    padding-top: 32px;
+    padding-bottom: max(env(safe-area-inset-bottom, 0px), 6px);
+    transition: transform 0.3s cubic-bezier(0.4,0,0.2,1), opacity 0.3s;
+  }
+  #controls.hidden {
+    transform: translateY(100%);
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  /* Hide chevron pill at top of panel */
+  #hide-pill {
+    display: flex; justify-content: center;
+    margin-bottom: 2px;
+  }
+  #hide-pill button {
+    background: transparent;
+    border: none; border-radius: 100px;
+    padding: 3px 22px; cursor: pointer;
+    color: rgba(255,255,255,0.38); font-size: 16px; line-height: 1.3;
+  }
+
+  /* FPS row */
+  #fps-row {
+    display: flex; align-items: center;
+    padding: 6px 12px 8px;
+    border-bottom: none;
+  }
+  .fps-btns {
+    display: flex; gap: 6px; flex: 1;
+    overflow-x: auto; -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+  }
+  .fps-btns::-webkit-scrollbar { display: none; }
+  .fps-btn {
+    flex-shrink: 0; padding: 5px 10px;
+    border-radius: 100px; border: 1.5px solid rgba(255,255,255,0.25);
+    background: transparent; color: rgba(255,255,255,0.75);
+    font-family: 'DM Mono', monospace; font-size: 13px;
+    cursor: pointer; transition: all 0.15s; white-space: nowrap;
+  }
+  .fps-btn.active {
+    background: transparent;
+    border-color: var(--accent2);
+    color: var(--accent2); font-weight: 500;
+  }
+  .fps-btn:active { opacity: 0.7; transform: scale(0.95); }
+
+  /* Speed row */
+  #speed-row {
+    display: flex; align-items: center;
+    padding: 6px 12px 8px;
+    border-bottom: none;
+  }
+  .speed-label {
+    font-size: 11px; font-family: 'DM Mono', monospace;
+    color: rgba(255,255,255,0.5); letter-spacing: 0.2em;
+    text-transform: uppercase; margin-right: 10px; white-space: nowrap;
+  }
+  .speed-btns {
+    display: flex; gap: 6px; flex: 1;
+    overflow-x: auto; -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+  }
+  .speed-btns::-webkit-scrollbar { display: none; }
+  .speed-btn {
+    flex-shrink: 0; padding: 5px 11px;
+    border-radius: 100px; border: 1.5px solid rgba(255,255,255,0.25);
+    background: transparent; color: rgba(255,255,255,0.75);
+    font-family: 'DM Mono', monospace; font-size: 13px;
+    cursor: pointer; transition: all 0.15s; white-space: nowrap;
+  }
+  .speed-btn.active {
+    background: transparent; border-color: var(--accent);
+    color: var(--accent); font-weight: 500;
+  }
+  .speed-btn:active { opacity: 0.7; transform: scale(0.95); }
+
+  /* Playback row */
+  #playback-row {
+    display: flex; align-items: center; justify-content: center;
+    gap: 8px; padding: 10px 12px;
+    border-bottom: none;
+  }
+  .ctrl-btn {
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    gap: 3px;
+    background: transparent;
+    border: none;
+    border-radius: 12px; padding: 10px 12px;
+    cursor: pointer; transition: all 0.15s;
+    flex: 1; max-width: 72px; min-height: 54px;
+  }
+  .ctrl-btn svg { width: 22px; height: 22px; stroke: rgba(255,255,255,0.85); fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+  .ctrl-btn span { font-size: 11px; font-family: 'DM Mono', monospace; color: rgba(255,255,255,0.6); letter-spacing: 0.05em; }
+  .ctrl-btn:active { opacity: 0.6; transform: scale(0.95); }
+
+  #play-btn {
+    background: transparent; border: none;
+    max-width: 80px; min-height: 60px;
+  }
+  #play-btn svg { stroke: #fff; width: 28px; height: 28px; }
+  #play-btn span { color: rgba(255,255,255,0.6); font-size: 11px; }
+  #play-btn:active { opacity: 0.7; transform: scale(0.95); }
+
+  .save-btn svg { stroke: rgba(255,255,255,0.85); }
+
+  /* Timeline */
+  #timeline-section {
+    padding: 8px 12px 10px;
+    display: flex; flex-direction: column; gap: 6px;
+  }
+  .timeline-label {
+    font-size: 10px; font-family: 'DM Mono', monospace;
+    color: var(--muted); letter-spacing: 0.15em; text-transform: uppercase;
+    display: flex; justify-content: space-between;
+  }
+  #progress-bar-wrap {
+    position: relative; height: 4px;
+    background: rgba(255,255,255,0.12);
+    border-radius: 2px; cursor: pointer;
+  }
+  #progress-fill {
+    height: 100%; background: var(--accent);
+    border-radius: 2px; width: 0%;
+    transition: width 0.08s linear;
+  }
+  #thumbnail-strip {
+    position: relative; height: 50px;
+    border-radius: 8px; overflow: hidden;
+    background: rgba(255,255,255,0.05);
+    border: 1px solid rgba(255,255,255,0.08);
+    cursor: pointer;
+  }
+  #thumb-canvas-strip {
+    display: flex; height: 100%; width: 100%;
+    position: absolute; top: 0; left: 0;
+  }
+  #thumb-canvas-strip canvas { flex-shrink: 0; height: 100%; object-fit: cover; }
+  #timeline-indicator {
+    position: absolute; top: 0; width: 2px; height: 100%;
+    background: var(--accent); pointer-events: none;
+    box-shadow: 0 0 6px var(--accent); z-index: 10;
+  }
+  #timeline-indicator::before {
+    content: ''; position: absolute; top: -4px; left: 50%;
+    transform: translateX(-50%);
+    width: 10px; height: 10px;
+    background: var(--accent); border-radius: 50%;
+  }
+  .thumb-loading {
+    color: var(--muted); font-size: 11px;
+    font-family: 'DM Mono', monospace; text-align: center; padding: 8px 0 0;
+  }
+
+  /* Loop range */
+  #loop-row {
+    display: flex; align-items: center; gap: 8px;
+    padding: 4px 12px 8px;
+  }
+  #loop-toggle {
+    background: transparent; border: 1.5px solid rgba(255,255,255,0.2);
+    border-radius: 100px; padding: 5px 12px;
+    color: rgba(255,255,255,0.5); font-family: 'DM Mono', monospace;
+    font-size: 12px; cursor: pointer; white-space: nowrap; flex-shrink: 0;
+    transition: all 0.15s;
+  }
+  #loop-toggle.active {
+    border-color: var(--accent2); color: var(--accent2);
+  }
+  #loop-set-in, #loop-set-out {
+    background: transparent; border: 1.5px solid rgba(255,255,255,0.2);
+    border-radius: 100px; padding: 5px 10px;
+    color: rgba(255,255,255,0.5); font-family: 'DM Mono', monospace;
+    font-size: 12px; cursor: pointer; white-space: nowrap; flex-shrink: 0;
+    transition: all 0.15s;
+  }
+  #loop-set-in.set { border-color: rgba(200,255,71,0.5); color: var(--accent); }
+  #loop-set-out.set { border-color: rgba(200,255,71,0.5); color: var(--accent); }
+  #loop-set-in:active, #loop-set-out:active, #loop-toggle:active, #loop-clear:active { opacity: 0.6; }
+
+  #loop-clear {
+    background: transparent; border: 1.5px solid rgba(255,255,255,0.2);
+    border-radius: 100px; padding: 5px 10px;
+    color: rgba(255,255,255,0.4); font-family: 'DM Mono', monospace;
+    font-size: 12px; cursor: pointer; white-space: nowrap; flex-shrink: 0;
+    transition: all 0.15s;
+  }
+
+  #loop-export {
+    background: transparent; border: 1.5px solid rgba(200,255,71,0.3);
+    border-radius: 100px; padding: 5px 11px;
+    color: var(--accent); font-family: 'DM Mono', monospace;
+    font-size: 12px; cursor: pointer; white-space: nowrap; flex-shrink: 0;
+    transition: all 0.15s;
+  }
+  #loop-export:active { opacity: 0.6; }
+  #loop-export:disabled { opacity: 0.3; cursor: not-allowed; }
+
+  #loop-convert {
+    background: transparent; border: 1.5px solid rgba(71,212,255,0.3);
+    border-radius: 100px; padding: 5px 11px;
+    color: var(--accent2); font-family: 'DM Mono', monospace;
+    font-size: 12px; cursor: pointer; white-space: nowrap; flex-shrink: 0;
+    transition: all 0.15s;
+  }
+  #loop-convert:active { opacity: 0.6; }
+
+  #export-format {
+    background: transparent; border: 1.5px solid rgba(255,255,255,0.2);
+    border-radius: 100px; padding: 5px 8px;
+    color: rgba(255,255,255,0.6); font-family: 'DM Mono', monospace;
+    font-size: 12px; cursor: pointer; flex-shrink: 0;
+    -webkit-appearance: none; appearance: none;
+    text-align: center;
+  }
+  #export-format option { background: #1a1a1a; color: #fff; }
+
+  /* Export progress overlay */
+  #export-overlay {
+    display: none;
+    position: fixed; inset: 0; z-index: 99999;
+    background: rgba(0,0,0,0.85);
+    flex-direction: column; align-items: center; justify-content: center;
+    gap: 16px;
+  }
+  #export-overlay.show { display: flex; }
+  #export-overlay p {
+    color: #fff; font-family: 'DM Mono', monospace;
+    font-size: 14px; text-align: center; line-height: 1.6;
+    padding: 0 24px;
+  }
+  #export-progress-bar {
+    width: 240px; height: 6px;
+    background: rgba(255,255,255,0.15); border-radius: 3px; overflow: hidden;
+  }
+  #export-progress-fill {
+    height: 100%; background: var(--accent);
+    border-radius: 3px; width: 0%;
+    transition: width 0.3s;
+  }
+  #export-cancel {
+    background: transparent; border: 1.5px solid rgba(255,255,255,0.25);
+    border-radius: 100px; padding: 7px 20px;
+    color: rgba(255,255,255,0.6); font-family: 'DM Mono', monospace;
+    font-size: 13px; cursor: pointer;
+  }
+
+  #loop-range-display {
+    flex: 1; font-family: 'DM Mono', monospace; font-size: 10px;
+    color: rgba(255,255,255,0.35); text-align: right; white-space: nowrap;
+    overflow: hidden; text-overflow: ellipsis;
+  }
+
+  /* Range overlay on thumbnail strip */
+  #loop-range-overlay {
+    position: absolute; top: 0; height: 100%;
+    background: rgba(200,255,71,0.15);
+    border-left: 2px solid var(--accent);
+    border-right: 2px solid var(--accent);
+    pointer-events: none; z-index: 8;
+    display: none;
+  }
+  #loop-range-overlay.show { display: block; }
+
+  /* Toast */
+  #toast {
+    position: fixed; bottom: 50px; left: 50%;
+    transform: translateX(-50%) translateY(14px);
+    background: rgba(15,15,22,0.92);
+    backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+    border: 1px solid rgba(255,255,255,0.1);
+    color: var(--text); padding: 9px 18px;
+    border-radius: 100px; font-size: 13px;
+    font-family: 'DM Mono', monospace;
+    opacity: 0; pointer-events: none;
+    transition: all 0.25s; z-index: 9999; white-space: nowrap;
+  }
+  #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+</style>
+</head>
+<body>
+
+<!-- Upload -->
+<div id="upload-screen">
+  <div class="logo">Video Frame Player</div>
+  <div class="upload-zone">
+    <input type="file" id="file-input" accept="video/*">
+    <div class="upload-icon">
+      <svg viewBox="0 0 24 24" fill="none" stroke-width="1.8">
+        <path d="M15 10l4.553-2.276A1 1 0 0121 8.723v6.554a1 1 0 01-1.447.894L15 14M3 8a2 2 0 012-2h10a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V8z"/>
+      </svg>
+    </div>
+    <div class="upload-text">選擇影片</div>
+    <div class="upload-sub">MP4 · MOV · WebM</div>
+  </div>
+</div>
+
+<!-- Player -->
+<div id="player-screen">
+  <div id="video-container">
+    <video id="video" playsinline webkit-playsinline></video>
+  </div>
+
+  <div id="tap-overlay"></div>
+
+  <div id="time-overlay">
+    <div id="time-display">00:00.000</div>
+    <div id="frame-display">Frame —</div>
+  </div>
+
+  <!-- Mini bar (when panel hidden) -->
+  <div id="mini-bar">
+    <button class="mini-btn" id="mini-back5">
+      <svg viewBox="0 0 24 24"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-3.47"/><text x="12" y="14.5" text-anchor="middle" font-size="6" fill="white" stroke="none" font-family="monospace">5</text></svg>
+    </button>
+    <button class="mini-btn" id="mini-prev">
+      <svg viewBox="0 0 24 24"><polygon points="11 19 2 12 11 5 11 19"/><line x1="22" y1="19" x2="22" y2="5"/></svg>
+    </button>
+    <button class="mini-btn" id="mini-play-btn">
+      <svg id="mini-play-icon" viewBox="0 0 24 24"><polygon fill="none" stroke-width="2" points="5 3 19 12 5 21 5 3"/></svg>
+    </button>
+    <button class="mini-btn" id="mini-next">
+      <svg viewBox="0 0 24 24"><polygon points="13 19 22 12 13 5 13 19"/><line x1="2" y1="19" x2="2" y2="5"/></svg>
+    </button>
+    <button class="mini-btn" id="mini-fwd5">
+      <svg viewBox="0 0 24 24"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-.49-3.47"/><text x="12" y="14.5" text-anchor="middle" font-size="6" fill="white" stroke="none" font-family="monospace">5</text></svg>
+    </button>
+    <div class="mini-divider"></div>
+    <button class="mini-btn" id="mini-save">
+      <svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="12" cy="13" r="3"/><rect x="8" y="3" width="8" height="4" rx="1"/></svg>
+    </button>
+    <div class="mini-divider"></div>
+    <button id="mini-expand">︿</button>
+  </div>
+
+  <!-- Floating controls -->
+  <div id="controls">
+    <div id="hide-pill"><button>︾</button></div>
+
+    <div id="speed-row">
+      <div class="speed-label">速度</div>
+      <div class="speed-btns">
+        <button class="speed-btn" data-speed="0.1">× 0.1</button>
+        <button class="speed-btn" data-speed="0.5">× 0.5</button>
+        <button class="speed-btn active" data-speed="1">× 1</button>
+        <button class="speed-btn" data-speed="2">× 2</button>
+        <button class="speed-btn" data-speed="frame">1 Frame/s</button>
+      </div>
+      <button id="change-video-btn" style="
+        flex-shrink:0;margin-left:8px;padding:5px 11px;
+        border-radius:100px;border:1.5px solid rgba(255,255,255,0.2);
+        background:transparent;color:rgba(255,255,255,0.5);
+        font-family:'DM Mono',monospace;font-size:12px;cursor:pointer;white-space:nowrap;
+      ">換片</button>
+    </div>
+
+    <div id="fps-row">
+      <div class="speed-label">FPS</div>
+      <div class="fps-btns">
+        <button class="fps-btn" data-fps="23.976">23.97</button>
+        <button class="fps-btn" data-fps="24">24</button>
+        <button class="fps-btn" data-fps="25">25</button>
+        <button class="fps-btn" data-fps="29.97">29.97</button>
+        <button class="fps-btn active" data-fps="30">30</button>
+        <button class="fps-btn" data-fps="50">50</button>
+        <button class="fps-btn" data-fps="59.94">59.94</button>
+        <button class="fps-btn" data-fps="60">60</button>
+        <button class="fps-btn" data-fps="120">120</button>
+        <button class="fps-btn" data-fps="240">240</button>
+      </div>
+    </div>
+
+    <div id="playback-row">
+      <button class="ctrl-btn" id="back5-btn">
+        <svg viewBox="0 0 24 24"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-3.47"/><text x="12" y="14.5" text-anchor="middle" font-size="6" fill="white" stroke="none" font-family="monospace">5</text></svg>
+        <span>-5s</span>
+      </button>
+      <button class="ctrl-btn" id="prev-frame-btn">
+        <svg viewBox="0 0 24 24"><polygon points="11 19 2 12 11 5 11 19"/><line x1="22" y1="19" x2="22" y2="5"/></svg>
+        <span>上格</span>
+      </button>
+      <button class="ctrl-btn" id="play-btn">
+        <svg id="play-icon" viewBox="0 0 24 24"><polygon fill="#0a0a0c" stroke="#0a0a0c" points="5 3 19 12 5 21 5 3"/></svg>
+        <span id="play-label">播放</span>
+      </button>
+      <button class="ctrl-btn" id="next-frame-btn">
+        <svg viewBox="0 0 24 24"><polygon points="13 19 22 12 13 5 13 19"/><line x1="2" y1="19" x2="2" y2="5"/></svg>
+        <span>下格</span>
+      </button>
+      <button class="ctrl-btn" id="fwd5-btn">
+        <svg viewBox="0 0 24 24"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-.49-3.47"/><text x="12" y="14.5" text-anchor="middle" font-size="6" fill="white" stroke="none" font-family="monospace">5</text></svg>
+        <span>+5s</span>
+      </button>
+      <button class="ctrl-btn save-btn" id="save-btn">
+        <svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="12" cy="13" r="3"/><rect x="8" y="3" width="8" height="4" rx="1"/></svg>
+        <span>截圖</span>
+      </button>
+    </div>
+
+    <div id="timeline-section">
+      <div class="timeline-label">
+        <span>時間軸</span>
+        <span id="total-time-label">—</span>
+      </div>
+      <div id="progress-bar-wrap"><div id="progress-fill"></div></div>
+      <div id="thumbnail-strip">
+        <div id="thumb-canvas-strip"></div>
+        <div id="loop-range-overlay"></div>
+        <div id="timeline-indicator"></div>
+      </div>
+      <div id="thumb-status" class="thumb-loading">生成縮圖中…</div>
+    </div>
+
+    <div id="loop-row">
+      <button id="loop-set-in">IN</button>
+      <button id="loop-set-out">OUT</button>
+      <button id="loop-clear">✕</button>
+      <button id="loop-toggle">⟲ 循環</button>
+      <select id="export-format">
+        <option value="original">原格式</option>
+        <option value="mp4">MP4</option>
+        <option value="mov">MOV</option>
+      </select>
+      <button id="loop-export">✂ 剪輯</button>
+      <button id="loop-convert">⇄ 轉檔</button>
+      <div id="loop-range-display">—</div>
+    </div>
+  </div>
+</div>
+
+<div id="export-overlay">
+  <p id="export-status">準備中…</p>
+  <div id="export-progress-bar"><div id="export-progress-fill"></div></div>
+  <button id="export-cancel">取消</button>
+</div>
+
+<div id="toast"></div>
+<canvas id="hidden-canvas" style="display:none"></canvas>
+
+<script>
+const video             = document.getElementById('video');
+const fileInput         = document.getElementById('file-input');
+const uploadScreen      = document.getElementById('upload-screen');
+const playerScreen      = document.getElementById('player-screen');
+const playBtn           = document.getElementById('play-btn');
+const playIcon          = document.getElementById('play-icon');
+const playLabel         = document.getElementById('play-label');
+const timeDisplay       = document.getElementById('time-display');
+const frameDisplay      = document.getElementById('frame-display');
+const progressFill      = document.getElementById('progress-fill');
+const timelineIndicator = document.getElementById('timeline-indicator');
+const thumbnailStrip    = document.getElementById('thumbnail-strip');
+const thumbCanvasStrip  = document.getElementById('thumb-canvas-strip');
+const hiddenCanvas      = document.getElementById('hidden-canvas');
+const thumbStatus       = document.getElementById('thumb-status');
+const totalTimeLabel    = document.getElementById('total-time-label');
+const controls          = document.getElementById('controls');
+const miniBar           = document.getElementById('mini-bar');
+const miniPlayIcon      = document.getElementById('mini-play-icon');
+const timeOverlay       = document.getElementById('time-overlay');
+
+let fps = 30;       // will be updated after detection
+let fpsDetected = false;
+let duration = 0;
+let isPlaying = false;
+let currentSpeed = 1;
+let frameMode = false;
+let frameInterval = null;
+let currentBlobUrl = null;
+let panelVisible = true;
+let autoHideTimer = null;
+
+// ── Utils ──
+function formatTime(s) {
+  const m = Math.floor(s / 60);
+  const sec = (s % 60).toFixed(3);
+  return `${String(m).padStart(2,'0')}:${sec.padStart(6,'0')}`;
+}
+function showToast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 2200);
+}
+function updateUI() {
+  const ct = video.currentTime;
+  const frame = Math.round(ct * fps);
+  timeDisplay.textContent = formatTime(ct);
+  frameDisplay.textContent = `Frame ${frame}  @${fps}fps`;
+  const pct = duration ? (ct / duration) * 100 : 0;
+  progressFill.style.width = pct + '%';
+  timelineIndicator.style.left = pct + '%';
+}
+
+// ── Panel show / hide ──
+function resetAutoHide() {
+  clearTimeout(autoHideTimer);
+  if (isPlaying && !frameMode) {
+    autoHideTimer = setTimeout(hidePanel, 4000);
+  }
+}
+
+function showPanel() {
+  panelVisible = true;
+  controls.classList.remove('hidden');
+  miniBar.classList.remove('show');
+  timeOverlay.classList.remove('hidden');
+  resetAutoHide();
+}
+function hidePanel() {
+  panelVisible = false;
+  controls.classList.add('hidden');
+  miniBar.classList.add('show');
+  clearTimeout(autoHideTimer);
+}
+
+document.getElementById('hide-pill').querySelector('button').addEventListener('click', hidePanel);
+document.getElementById('mini-expand').addEventListener('click', showPanel);
+
+// Mini bar controls
+function syncMiniPlayIcon(playing) {
+  miniPlayIcon.innerHTML = playing
+    ? '<rect x="6" y="4" width="4" height="16" fill="none" stroke-width="2"/><rect x="14" y="4" width="4" height="16" fill="none" stroke-width="2"/>'
+    : '<polygon fill="none" stroke-width="2" points="5 3 19 12 5 21 5 3"/>';
+}
+
+document.getElementById('mini-play-btn').addEventListener('click', e => { e.stopPropagation(); togglePlay(); });
+document.getElementById('mini-back5').addEventListener('click', e => {
+  e.stopPropagation(); stopFrameMode();
+  video.currentTime = Math.max(0, video.currentTime - 5); updateUI();
+});
+document.getElementById('mini-fwd5').addEventListener('click', e => {
+  e.stopPropagation(); stopFrameMode();
+  video.currentTime = Math.min(duration, video.currentTime + 5); updateUI();
+});
+document.getElementById('mini-save').addEventListener('click', e => {
+  e.stopPropagation();
+  document.getElementById('save-btn').click();
+});
+
+// ── Pinch zoom, pan & tap ──
+(function() {
+  const container = document.getElementById('video-container');
+  const tapOverlay = document.getElementById('tap-overlay');
+  const vid = document.getElementById('video');
+
+  let scale = 1, posX = 0, posY = 0;
+  let startScale = 1, startPosX = 0, startPosY = 0;
+  let panStartX = 0, panStartY = 0;
+  let lastTapTime = 0;
+  let didMove = false;
+  const MIN_SCALE = 1, MAX_SCALE = 8;
+
+  function applyTransform(animate) {
+    vid.style.transition = animate ? 'transform 0.25s ease' : 'none';
+    vid.style.transform = `translate(${posX}px, ${posY}px) scale(${scale})`;
+  }
+
+  function clampPos() {
+    if (scale <= 1) { posX = 0; posY = 0; return; }
+    const maxX = (container.offsetWidth  * (scale - 1)) / 2;
+    const maxY = (container.offsetHeight * (scale - 1)) / 2;
+    posX = Math.max(-maxX, Math.min(maxX, posX));
+    posY = Math.max(-maxY, Math.min(maxY, posY));
+  }
+
+  function midpoint(t1, t2) {
+    return { x: (t1.clientX + t2.clientX) / 2, y: (t1.clientY + t2.clientY) / 2 };
+  }
+  function dist(t1, t2) {
+    const dx = t1.clientX - t2.clientX, dy = t1.clientY - t2.clientY;
+    return Math.sqrt(dx * dx + dy * dy);
+  }
+
+  tapOverlay.addEventListener('touchstart', e => {
+    if (e.touches.length === 2) {
+      e.preventDefault();
+      didMove = true;
+      startScale = scale;
+      startPosX = posX; startPosY = posY;
+      const mid = midpoint(e.touches[0], e.touches[1]);
+      panStartX = mid.x; panStartY = mid.y;
+      container._startDist = dist(e.touches[0], e.touches[1]);
+    } else if (e.touches.length === 1) {
+      didMove = false;
+      panStartX = e.touches[0].clientX - posX;
+      panStartY = e.touches[0].clientY - posY;
+      if (scale > 1) e.preventDefault();
+    }
+  }, { passive: false });
+
+  tapOverlay.addEventListener('touchmove', e => {
+    if (e.touches.length === 2) {
+      e.preventDefault();
+      didMove = true;
+      const d = dist(e.touches[0], e.touches[1]);
+      const newScale = Math.max(MIN_SCALE, Math.min(MAX_SCALE, startScale * d / container._startDist));
+      const mid = midpoint(e.touches[0], e.touches[1]);
+      const rect = container.getBoundingClientRect();
+      const cx = mid.x - rect.left - rect.width  / 2;
+      const cy = mid.y - rect.top  - rect.height / 2;
+      const prevCx = panStartX - rect.left - rect.width  / 2;
+      const prevCy = panStartY - rect.top  - rect.height / 2;
+      posX = cx - (prevCx - startPosX) * (newScale / startScale);
+      posY = cy - (prevCy - startPosY) * (newScale / startScale);
+      scale = newScale;
+      clampPos();
+      applyTransform(false);
+    } else if (e.touches.length === 1 && scale > 1) {
+      e.preventDefault();
+      const dx = e.touches[0].clientX - (panStartX + posX);
+      const dy = e.touches[0].clientY - (panStartY + posY);
+      if (Math.abs(dx) > 4 || Math.abs(dy) > 4) didMove = true;
+      posX = e.touches[0].clientX - panStartX;
+      posY = e.touches[0].clientY - panStartY;
+      clampPos();
+      applyTransform(false);
+    }
+  }, { passive: false });
+
+  tapOverlay.addEventListener('touchend', e => {
+    if (e.touches.length < 2 && scale < 1.05) {
+      scale = 1; posX = 0; posY = 0; applyTransform(true);
+    }
+
+    if (e.touches.length === 0) {
+      const now = Date.now();
+      if (!didMove) {
+        // Double-tap: reset zoom
+        if (now - lastTapTime < 300) {
+          scale = 1; posX = 0; posY = 0; applyTransform(true);
+        } else {
+          // Single tap: play/pause
+          togglePlay();
+        }
+      }
+      lastTapTime = now;
+      didMove = false;
+    }
+  }, { passive: true });
+})();
+
+const changeInput = document.createElement('input');
+changeInput.type = 'file';
+changeInput.accept = 'video/*';
+changeInput.style.display = 'none';
+document.body.appendChild(changeInput);
+
+fileInput.addEventListener('change', e => {
+  const f = e.target.files && e.target.files[0];
+  if (!f) return;
+  fileInput.value = '';
+  loadVideoFile(f);
+});
+changeInput.addEventListener('change', e => {
+  const f = e.target.files && e.target.files[0];
+  if (!f) return;
+  changeInput.value = '';
+  loadVideoFile(f);
+});
+document.getElementById('change-video-btn').addEventListener('click', e => {
+  e.stopPropagation(); changeInput.click();
+});
+
+function loadVideoFile(file) {
+  stopFrameMode();
+  video.pause();
+  isPlaying = false; setPlayIcon(false);
+  duration = 0;
+  thumbCanvasStrip.innerHTML = '';
+  thumbStatus.textContent = '載入中…';
+  thumbStatus.style.display = 'block';
+
+  document.querySelectorAll('.speed-btn').forEach(b => b.classList.remove('active'));
+  document.querySelector('.speed-btn[data-speed="1"]').classList.add('active');
+  currentSpeed = 1; video.playbackRate = 1;
+  fps = 30; fpsDetected = false;
+  document.querySelectorAll('.fps-btn').forEach(b => {
+    b.classList.toggle('active', b.dataset.fps === '30');
+  });
+  resetLoop();
+
+  if (currentBlobUrl) { URL.revokeObjectURL(currentBlobUrl); currentBlobUrl = null; }
+  currentFile = file;
+
+  try {
+    currentBlobUrl = URL.createObjectURL(file);
+  } catch(e) {
+    showToast('無法開啟檔案'); return;
+  }
+
+  uploadScreen.style.display = 'none';
+  playerScreen.style.display = 'block';
+  showPanel();
+  requestWakeLock();
+
+  let metaFired = false;
+  function onMeta() {
+    if (metaFired) return;
+    metaFired = true;
+    onMetaLoaded();
+  }
+
+  // Remove any previous listeners before adding new ones
+  video.removeEventListener('loadedmetadata', onMeta);
+  video.addEventListener('loadedmetadata', onMeta, { once: true });
+  video.addEventListener('canplaythrough', function probe() {
+    video.removeEventListener('canplaythrough', probe);
+    if (!metaFired && video.duration > 0) onMeta();
+  }, { once: true });
+
+  // Stall detection — if nothing fires in 10s, show error
+  const stallTimer = setTimeout(() => {
+    if (!metaFired) {
+      if (video.duration > 0) { onMeta(); return; }
+      thumbStatus.textContent = '載入逾時，請重新選擇';
+      showToast('載入逾時');
+    }
+  }, 10000);
+
+  // Clear stall timer once loaded
+  video.addEventListener('loadedmetadata', () => clearTimeout(stallTimer), { once: true });
+
+  // Set src once, then load once
+  video.src = currentBlobUrl;
+  video.load();
+}
+
+function onMetaLoaded() {
+  if (!video.duration || isNaN(video.duration)) {
+    showToast('無法讀取影片資訊');
+    thumbStatus.textContent = '載入失敗';
+    return;
+  }
+  duration = video.duration;
+  fpsDetected = false;
+  fps = 30;
+  totalTimeLabel.textContent = formatTime(duration);
+  thumbStatus.textContent = '偵測 fps 中…';
+  thumbStatus.style.display = 'block';
+  updateUI();
+  updateLoopOverlay();
+  detectFPS().then(() => {
+    updateUI();
+    generateThumbnails();
+  });
+}
+
+// ── Video error handling ──
+video.addEventListener('error', () => {
+  const err = video.error;
+  const msg = err ? ({1:'已中止',2:'網路錯誤',3:'解碼錯誤',4:'格式不支援'}[err.code] || '未知錯誤') : '載入錯誤';
+  showToast(`影片錯誤：${msg}`);
+  thumbStatus.textContent = `錯誤：${msg}`;
+  thumbStatus.style.display = 'block';
+  isPlaying = false; setPlayIcon(false);
+});
+
+// ── FPS Detection via mp4box.js ──
+let currentFile = null;
+
+// ── FPS manual buttons ──
+function setFps(value) {
+  fps = value;
+  fpsDetected = true;
+  document.querySelectorAll('.fps-btn').forEach(b => {
+    b.classList.toggle('active', parseFloat(b.dataset.fps) === value);
+  });
+  updateUI();
+}
+
+document.querySelectorAll('.fps-btn').forEach(btn => {
+  btn.addEventListener('click', e => {
+    e.stopPropagation();
+    setFps(parseFloat(btn.dataset.fps));
+    showToast(`FPS 設為 ${fps}`);
+    resetAutoHide();
+  });
+});
+
+function detectFPS() {
+  return new Promise(async resolve => {
+    if (!currentFile) { showToast('請手動選擇 FPS'); resolve(); return; }
+
+    try {
+      const result = await parseFPS(currentFile);
+      if (result && result > 1 && result <= 300) {
+        setFps(snapToCommonFPS(result));
+        showToast(`自動偵測 ${fps} fps`);
+      } else {
+        showToast('無法偵測，請手動選 FPS');
+      }
+    } catch(e) {
+      showToast('請手動選擇 FPS');
+    }
+    resolve();
+  });
+}
+
+async function parseFPS(file) {
+  const fileSize = file.size;
+  const TAIL = Math.min(8 * 1024 * 1024, fileSize);
+  const HEAD = Math.min(4 * 1024 * 1024, fileSize);
+
+  // Try head first (moov at front for some MP4)
+  const headBuf = await readFileSlice(file, 0, HEAD);
+  let result = scanBufferForFPS(headBuf, 0);
+  if (result) return result;
+
+  // Try tail (iPhone MOV: moov at end)
+  if (fileSize > HEAD) {
+    const tailStart = fileSize - TAIL;
+    const tailBuf = await readFileSlice(file, tailStart, fileSize);
+    result = scanBufferForFPS(tailBuf, tailStart);
+    if (result) return result;
+  }
+
+  return null;
+}
+
+function scanBufferForFPS(buf, bufStart) {
+  const view = new DataView(buf);
+  const len = buf.byteLength;
+
+  for (let i = 0; i + 8 <= len; i++) {
+    if (view.getUint8(i)   === 0x6D &&
+        view.getUint8(i+1) === 0x6F &&
+        view.getUint8(i+2) === 0x6F &&
+        view.getUint8(i+3) === 0x76) {
+      if (i < 4) continue;
+      const moovSize = readU32(view, i - 4);
+      const moovEnd = Math.min(i - 4 + moovSize, len);
+      const result = parseMoov(view, i + 4, moovEnd);
+      if (result) return result;
+    }
+  }
+  return null;
+}
+
+function parseMoov(view, start, end) {
+  let off = start;
+  while (off + 8 <= end) {
+    const size = readU32(view, off);
+    const name = read4cc(view, off + 4);
+    if (size < 8) break;
+    const childEnd = Math.min(off + size, end);
+    if (name === 'trak') {
+      const result = parseTrak(view, off + 8, childEnd);
+      if (result) return result;
+    }
+    off += size;
+  }
+  return null;
+}
+
+function parseTrak(view, start, end) {
+  let timescale = null, sampleDelta = null, isVideo = false;
+
+  function walk(s, e) {
+    let off = s;
+    while (off + 8 <= e) {
+      const size = readU32(view, off);
+      const name = read4cc(view, off + 4);
+      if (size < 8) break;
+      const ce = Math.min(off + size, e);
+      if (name === 'mdia' || name === 'minf' || name === 'stbl') {
+        walk(off + 8, ce);
+      } else if (name === 'mdhd') {
+        timescale = parseMdhd(view, off + 8, ce);
+      } else if (name === 'hdlr') {
+        const h = parseHdlr(view, off + 8, ce);
+        if (h) isVideo = true;
+      } else if (name === 'stts') {
+        sampleDelta = parseStts(view, off + 8, ce);
+      }
+      off += size;
+    }
+  }
+  walk(start, end);
+
+  if (isVideo && timescale && sampleDelta && sampleDelta > 0) {
+    return timescale / sampleDelta;
+  }
+  return null;
+}
+
+function parseMdhd(view, start, end) {
+  if (start + 4 > end) return null;
+  const ver = view.getUint8(start);
+  // version 0: [version(1)+flags(3)] + creation(4) + modification(4) + timescale(4)
+  // version 1: [version(1)+flags(3)] + creation(8) + modification(8) + timescale(4)
+  const tsOff = ver === 1 ? start + 4 + 8 + 8 : start + 4 + 4 + 4;
+  if (tsOff + 4 > end) return null;
+  return readU32(view, tsOff);
+}
+
+function parseHdlr(view, start, end) {
+  if (start + 12 > end) return false;
+  const h = read4cc(view, start + 8);
+  return h === 'vide';
+}
+
+function parseStts(view, start, end) {
+  // [version(1)+flags(3)] + entry_count(4) + [count(4)+delta(4)...]
+  if (start + 8 > end) return null;
+  const entryCount = readU32(view, start + 4);
+  if (!entryCount) return null;
+  // Pick the entry with the most samples (dominant frame interval)
+  let bestDelta = 0, bestCount = 0;
+  for (let i = 0; i < entryCount && i < 64; i++) {
+    const base = start + 8 + i * 8;
+    if (base + 8 > end) break;
+    const count = readU32(view, base);
+    const delta = readU32(view, base + 4);
+    if (delta > 0 && count > bestCount) { bestCount = count; bestDelta = delta; }
+  }
+  return bestDelta || null;
+}
+
+function readU32(view, off) { return view.getUint32(off, false); }
+function read4cc(view, off) {
+  let s = '';
+  for (let i = 0; i < 4; i++) s += String.fromCharCode(view.getUint8(off + i));
+  return s;
+}
+
+function snapToCommonFPS(raw) {
+  const common = [23.976, 24, 25, 29.97, 30, 48, 50, 59.94, 60, 90, 100, 119.88, 120, 240];
+  let best = common[0], bestDiff = Infinity;
+  for (const c of common) {
+    const d = Math.abs(raw - c);
+    if (d < bestDiff) { bestDiff = d; best = c; }
+  }
+  return bestDiff / raw < 0.06 ? best : Math.round(raw * 10) / 10;
+}
+
+function readFileSlice(file, start, end) {
+  return new Promise((resolve, reject) => {
+    if (start >= end) { resolve(new ArrayBuffer(0)); return; }
+    const r = new FileReader();
+    r.onload = e => resolve(e.target.result);
+    r.onerror = e => reject(new Error('FileReader 錯誤：' + (r.error?.message || '讀取失敗')));
+    r.readAsArrayBuffer(file.slice(start, end));
+  });
+}
+
+// ── Byte-range extraction: only read the bytes needed for the clip ──
+async function extractClipBlob(file, clipIn, clipOut) {
+  const SCAN = Math.min(10 * 1024 * 1024, file.size);
+
+  // ── helpers ──
+  function u32(b, o)       { return ((b[o]<<24)|(b[o+1]<<16)|(b[o+2]<<8)|b[o+3])>>>0; }
+  function w32(b, o, v)    { v>>>=0; b[o]=v>>>24; b[o+1]=(v>>>16)&255; b[o+2]=(v>>>8)&255; b[o+3]=v&255; }
+  function cc(b, o)        { return String.fromCharCode(b[o],b[o+1],b[o+2],b[o+3]); }
+  function box(name, ...children) {
+    let size = 8;
+    for (const c of children) size += c.length;
+    const b = new Uint8Array(size);
+    w32(b, 0, size);
+    for (let i = 0; i < 4; i++) b[4+i] = name.charCodeAt(i);
+    let pos = 8;
+    for (const c of children) { b.set(c, pos); pos += c.length; }
+    return b;
+  }
+  function u32be(v) { const b=new Uint8Array(4); w32(b,0,v); return b; }
+  function u32arr(arr) {
+    const b = new Uint8Array(4 + arr.length*4);
+    w32(b, 0, arr.length);
+    arr.forEach((v,i) => w32(b, 4+i*4, v));
+    return b;
+  }
+  function concat(arrays) {
+    let total = 0; for (const a of arrays) total += a.length;
+    const out = new Uint8Array(total); let pos = 0;
+    for (const a of arrays) { out.set(a, pos); pos += a.length; }
+    return out;
+  }
+
+  // ── find ftyp + moov ──
+  let ftypU8 = null, moovU8 = null;
+  async function scanBuf(ab) {
+    const b = new Uint8Array(ab); let off = 0;
+    while (off + 8 <= b.length) {
+      const sz = u32(b, off), nm = cc(b, off+4);
+      if (sz < 8) break;
+      if (nm === 'ftyp') ftypU8 = b.slice(off, off+sz);
+      if (nm === 'moov') { moovU8 = b.slice(off, Math.min(off+sz, b.length)); return true; }
+      off += sz;
+    }
+    return false;
+  }
+  await scanBuf(await readFileSlice(file, 0, SCAN));
+  if (!moovU8 && file.size > SCAN) {
+    const tailAb = await readFileSlice(file, file.size - SCAN, file.size);
+    const tb = new Uint8Array(tailAb);
+    for (let i = 4; i+8 <= tb.length; i++) {
+      if (cc(tb,i) === 'moov') { moovU8 = tb.slice(i-4, Math.min(i-4+u32(tb,i-4), tb.length)); break; }
+    }
+  }
+  if (!moovU8) throw new Error('找不到 moov');
+
+  // ── parse video track ──
+  const vt = parseVideoTrackFull(moovU8.buffer);
+  if (!vt || !vt.stco.length) throw new Error('找不到視訊軌');
+  const { timescale, stts, stsc, stco, stsz, stss, ctts, fixedSampleSize } = vt;
+  const TC = stco.length;
+
+  function spc(ci) {
+    let r = 1;
+    for (let i = stsc.length-1; i >= 0; i--)
+      if (ci >= stsc[i].firstChunk-1) { r = stsc[i].samplesPerChunk; break; }
+    return r;
+  }
+  const css = new Array(TC); { let s=0; for(let c=0;c<TC;c++){css[c]=s;s+=spc(c);} }
+  const TS = css[TC-1] + spc(TC-1);
+
+  function time2s(sec) {
+    const tgt = Math.round(sec * timescale); let s=0,t=0;
+    for (const e of stts) {
+      if (!e.delta){s+=e.count;continue;}
+      const end=t+e.count*e.delta;
+      if (end>tgt) return s+Math.floor((tgt-t)/e.delta);
+      t=end; s+=e.count;
+    }
+    return Math.min(s,TS);
+  }
+  function ss(si) { return fixedSampleSize>0 ? fixedSampleSize : (si<stsz.length?stsz[si]:0); }
+
+  // chunk range (snap to keyframe after origStss is parsed below)
+  const s0raw = time2s(clipIn), s1 = Math.min(TS, time2s(clipOut));
+  let s0 = s0raw; // will be snapped to keyframe below
+  let c0=0; for(let c=0;c<TC-1;c++){if(css[c+1]>s0)break; c0=c+1;} c0=Math.min(c0,TC-1);
+  let c1=c0; for(let c=c0;c<TC;c++){c1=c; if(css[c]+spc(c)>=s1)break;}
+
+  let clipS0 = css[c0], clipS1 = Math.min(s1, css[c1]+spc(c1));
+  // trimmed tables will be computed after keyframe snap below
+
+  function mkStts() {
+    const b = new Uint8Array(8 + newStts.length*8); w32(b,4,newStts.length);
+    newStts.forEach(([c,d],i)=>{w32(b,8+i*8,c);w32(b,8+i*8+4,d);}); return box('stts',b);
+  }
+  function mkStsc() {
+    const b = new Uint8Array(8 + newStsc.length*12); w32(b,4,newStsc.length);
+    newStsc.forEach(([f,s,d],i)=>{w32(b,8+i*12,f);w32(b,8+i*12+4,s);w32(b,8+i*12+8,d);}); return box('stsc',b);
+  }
+  function mkStco(offsets) {
+    const b = new Uint8Array(8 + offsets.length*4); w32(b,4,offsets.length);
+    offsets.forEach((o,i)=>w32(b,8+i*4,o)); return box('stco',b);
+  }
+  function mkStsz() {
+    if (!newStsz) { const b=new Uint8Array(12); w32(b,4,fixedSampleSize); w32(b,8,0); return box('stsz',b); }
+    const b=new Uint8Array(12+newStsz.length*4); w32(b,8,newStsz.length);
+    newStsz.forEach((s,i)=>w32(b,12+i*4,s)); return box('stsz',b);
+  }
+
+  // get movie timescale
+  let mvTs=1000;
+  { let off=8; while(off+8<=moovU8.length){const sz=u32(moovU8,off),nm=cc(moovU8,off+4);if(sz<8)break;
+    if(nm==='mvhd'){const ver=moovU8[off+8]; mvTs=u32(moovU8,off+8+(ver===1?20:12)); break;} off+=sz;} }
+  const mvDur = Math.round((clipOut-clipIn)*mvTs);
+
+  // ── walk moov: keep only video trak, rebuild stbl ──
+  function isVideoTrak(b, s, e) {
+    let off=s; while(off+8<=e){const sz=u32(b,off),nm=cc(b,off+4);if(sz<8)break;
+      if(nm==='mdia'){let o2=off+8;while(o2+8<=Math.min(off+sz,e)){const s2=u32(b,o2),n2=cc(b,o2+4);if(s2<8)break;
+        if(n2==='hdlr')return cc(b,o2+8+8)==='vide'; o2+=s2;}} off+=sz;} return false;
+  }
+
+  function patchDur(orig, ticks) {
+    const b = orig.slice(); const ver = b[0];
+    if (ver===1){w32(b,24,0);w32(b,28,ticks);}else w32(b,16,ticks);
+    return b;
+  }
+
+  // Parse stss (keyframe list) and ctts (composition offsets) from original trak
+  let origStss = [], origCtts = [];
+  { const vbuf = moovU8.buffer;
+    const vv = new DataView(vbuf);
+    function findTables(s, e) {
+      let off = s;
+      while (off + 8 <= e) {
+        const sz = readU32(vv, off), nm = read4cc(vv, off + 4);
+        if (sz < 8) break;
+        const cs = off + 8, ce2 = Math.min(off + sz, e);
+        if (['mdia','minf','stbl'].includes(nm)) findTables(cs, ce2);
+        else if (nm === 'stss') {
+          const cnt = readU32(vv, cs + 4);
+          for (let i = 0; i < cnt && cs + 8 + i*4 + 3 < ce2; i++)
+            origStss.push(readU32(vv, cs + 8 + i*4));
+        }
+        else if (nm === 'ctts') {
+          const cnt = readU32(vv, cs + 4);
+          for (let i = 0; i < cnt && cs + 8 + i*8 + 7 < ce2; i++)
+            origCtts.push({ count: readU32(vv, cs + 8 + i*8), offset: vv.getInt32(cs + 8 + i*8 + 4, false) }); // signed!
+        }
+        off += sz;
+      }
+    }
+    // Find the video trak
+    let toff = 8;
+    while (toff + 8 <= moovU8.length) {
+      const sz = u32(moovU8, toff), nm = cc(moovU8, toff + 4);
+      if (sz < 8) break;
+      if (nm === 'trak' && isVideoTrak(moovU8, toff + 8, Math.min(toff + sz, moovU8.length)))
+        { findTables(toff + 8, Math.min(toff + sz, moovU8.length)); break; }
+      toff += sz;
+    }
+  }
+
+  // Snap s0 to nearest keyframe using origStss
+  if (origStss.length) {
+    const s0rawIdx = s0raw; // 0-based
+    let kf = origStss[0] - 1;
+    for (const n of origStss) { const k = n - 1; if (k <= s0rawIdx) kf = k; else break; }
+    s0 = kf;
+    // Recalculate chunk range with new s0
+    c0 = 0; for (let c = 0; c < TC - 1; c++) { if (css[c+1] > s0) break; c0 = c+1; }
+    c0 = Math.min(c0, TC-1);
+    c1 = c0; for (let c = c0; c < TC; c++) { c1 = c; if (css[c]+spc(c) >= s1) break; }
+    clipS0 = css[c0]; clipS1 = Math.min(s1, css[c1]+spc(c1));
+  }
+
+  // Byte range (after keyframe snap)
+  const byteStart = stco[c0];
+  let byteEnd = c1+1<TC ? stco[c1+1] : stco[c1]+(()=>{let b=0,n=spc(c1);for(let i=0;i<n;i++)b+=ss(css[c1]+i);return b;})();
+  byteEnd = Math.min(byteEnd, file.size);
+  const mdat = new Uint8Array(await readFileSlice(file, byteStart, byteEnd));
+  const CC = c1-c0+1;
+
+  // ── build trimmed tables (after snap so clipS0/clipS1/CC are final) ──
+  const newStts = [];
+  { let si=0; for(const e of stts){
+    const a=Math.max(si,clipS0), b=Math.min(si+e.count,clipS1);
+    if(b>a) newStts.push([b-a, e.delta]);
+    si+=e.count; if(si>=clipS1)break;
+  }}
+  const newStsc=[]; for(let c=0;c<CC;c++){const n=spc(c0+c); if(!newStsc.length||n!==newStsc[newStsc.length-1][1]) newStsc.push([c+1,n,1]);}
+  const newStsz = fixedSampleSize>0 ? null : Array.from({length:clipS1-clipS0},(_,i)=>ss(clipS0+i));
+  let clipTicks=0; for(const [cnt,dlt] of newStts) clipTicks+=cnt*dlt;
+
+  // Trim stss to clip sample range, re-index from 1
+  function mkStss() {
+    const entries = origStss
+      .filter(n => n - 1 >= clipS0 && n - 1 < clipS1)
+      .map(n => n - clipS0); // 1-based sample number within clip
+    if (!entries.length) return null;
+    const b = new Uint8Array(8 + entries.length * 4);
+    w32(b, 4, entries.length);
+    entries.forEach((v, i) => w32(b, 8 + i*4, v));
+    return box('stss', b);
+  }
+
+  // Trim ctts to clip sample range
+  function mkCtts() {
+    if (!origCtts.length) return null;
+    const result = [];
+    let si = 0;
+    for (const e of origCtts) {
+      const a = Math.max(si, clipS0), b2 = Math.min(si + e.count, clipS1);
+      if (b2 > a) result.push({ count: b2 - a, offset: e.offset });
+      si += e.count;
+      if (si >= clipS1) break;
+    }
+    if (!result.length) return null;
+    const b = new Uint8Array(8 + result.length * 8);
+    w32(b, 0, 1); // version 1 supports signed offsets
+    w32(b, 4, result.length);
+    result.forEach((e, i) => {
+      w32(b, 8 + i*8, e.count);
+      // write signed int32 big-endian
+      const dv = new DataView(b.buffer, b.byteOffset + 8 + i*8 + 4, 4);
+      dv.setInt32(0, e.offset, false);
+    });
+    return box('ctts', b);
+  }
+
+  function walkStbl(b, s, e, stcoOffsets) {
+    const parts=[]; let off=s;
+    while(off+8<=e){const sz=u32(b,off),nm=cc(b,off+4);if(sz<8)break;
+      const ce=Math.min(off+sz,e);
+      if(nm==='stts') parts.push(mkStts());
+      else if(nm==='stsc') parts.push(mkStsc());
+      else if(nm==='stco'||nm==='co64') parts.push(mkStco(stcoOffsets));
+      else if(nm==='stsz') parts.push(mkStsz());
+      else if(nm==='stss') { const s2=mkStss(); if(s2) parts.push(s2); }
+      else if(nm==='ctts') { const c2=mkCtts(); if(c2) parts.push(c2); }
+      else parts.push(b.slice(off,ce));
+      off+=sz;}
+    return parts;
+  }
+
+  function walkMinf(b, s, e, stcoOffsets) {
+    const parts=[]; let off=s;
+    while(off+8<=e){const sz=u32(b,off),nm=cc(b,off+4);if(sz<8)break;
+      const ce=Math.min(off+sz,e);
+      if(nm==='stbl') { const sp=walkStbl(b,off+8,ce,stcoOffsets); parts.push(box('stbl',...sp)); }
+      else parts.push(b.slice(off,ce));
+      off+=sz;}
+    return parts;
+  }
+
+  function walkMdia(b, s, e, stcoOffsets) {
+    const parts=[]; let off=s;
+    while(off+8<=e){const sz=u32(b,off),nm=cc(b,off+4);if(sz<8)break;
+      const ce=Math.min(off+sz,e);
+      if(nm==='mdhd') parts.push(box('mdhd',patchDur(b.slice(off+8,ce), clipTicks)));
+      else if(nm==='minf') parts.push(box('minf',...walkMinf(b,off+8,ce,stcoOffsets)));
+      else parts.push(b.slice(off,ce));
+      off+=sz;}
+    return parts;
+  }
+
+  function walkTrak(b, s, e, stcoOffsets) {
+    const parts=[]; let off=s;
+    while(off+8<=e){const sz=u32(b,off),nm=cc(b,off+4);if(sz<8)break;
+      const ce=Math.min(off+sz,e);
+      if(nm==='tkhd') parts.push(box('tkhd',patchDur(b.slice(off+8,ce), mvDur)));
+      else if(nm==='mdia') parts.push(box('mdia',...walkMdia(b,off+8,ce,stcoOffsets)));
+      else if(nm==='edts') {} // skip
+      else parts.push(b.slice(off,ce));
+      off+=sz;}
+    return parts;
+  }
+
+  // First pass: build moov without stco to measure size
+  function buildMoovContent(stcoOffsets) {
+    const placeholder = new Array(CC).fill(0);
+    const offsets = stcoOffsets || placeholder;
+    const parts=[]; let off=8;
+    while(off+8<=moovU8.length){const sz=u32(moovU8,off),nm=cc(moovU8,off+4);if(sz<8)break;
+      const ce=Math.min(off+sz,moovU8.length);
+      if(nm==='mvhd'){parts.push(box('mvhd',patchDur(moovU8.slice(off+8,ce),mvDur)));}
+      else if(nm==='trak'&&isVideoTrak(moovU8,off+8,ce)){
+        const tp=walkTrak(moovU8,off+8,ce,offsets);
+        parts.push(box('trak',...tp));
+      }
+      // skip non-video traks, udta, meta
+      off+=sz;}
+    return concat(parts);
+  }
+
+  // Measure moov size
+  const moovContent0 = buildMoovContent(null);
+  const moovSize = 8 + moovContent0.length;
+  const ftypSize = ftypU8 ? ftypU8.length : 0;
+  const mdatHdrSize = 8;
+  const mdatOffset = ftypSize + moovSize + mdatHdrSize;
+
+  // Real stco offsets
+  const relOffsets = Array.from({length:CC},(_,i)=>stco[c0+i]-byteStart);
+  const finalStco = relOffsets.map(r => r + mdatOffset);
+  const moovContent = buildMoovContent(finalStco);
+  const moovBox = box('moov', moovContent);
+
+  // Verify size matches
+  if (moovBox.length !== moovSize) {
+    // Size changed (shouldn't happen) — recalculate
+    const mdatOffset2 = ftypSize + moovBox.length + mdatHdrSize;
+    const finalStco2 = relOffsets.map(r => r + mdatOffset2);
+    const moovContent2 = buildMoovContent(finalStco2);
+    const moovBox2 = box('moov', moovContent2);
+    const mdatHdr = new Uint8Array(8);
+    w32(mdatHdr,0,mdat.length+8); mdatHdr[4]=0x6D;mdatHdr[5]=0x64;mdatHdr[6]=0x61;mdatHdr[7]=0x74;
+    const parts2=[]; if(ftypU8)parts2.push(ftypU8); parts2.push(moovBox2,mdatHdr,mdat);
+    const mime2=file.type||(file.name.toLowerCase().endsWith('.mov')?'video/quicktime':'video/mp4');
+    return new Blob(parts2,{type:mime2});
+  }
+
+  // mdat header
+  const mdatHdr = new Uint8Array(8);
+  w32(mdatHdr,0,mdat.length+8); mdatHdr[4]=0x6D;mdatHdr[5]=0x64;mdatHdr[6]=0x61;mdatHdr[7]=0x74;
+
+  const finalParts = []; if(ftypU8)finalParts.push(ftypU8);
+  finalParts.push(moovBox, mdatHdr, mdat);
+  const mime=file.type||(file.name.toLowerCase().endsWith('.mov')?'video/quicktime':'video/mp4');
+  return new Blob(finalParts,{type:mime});
+}
+
+function parseVideoTrackFull(moovBuf) {
+  const view = new DataView(moovBuf);
+  let off = 8;
+  while (off + 8 <= moovBuf.byteLength) {
+    const sz = readU32(view, off), nm = read4cc(view, off + 4);
+    if (sz < 8) break;
+    if (nm === 'trak') {
+      const t = parseTrakFull(view, off + 8, Math.min(off + sz, moovBuf.byteLength));
+      if (t && t.isVideo) return t;
+    }
+    off += sz;
+  }
+  return null;
+}
+
+function parseTrakFull(view, start, end) {
+  let timescale = null, isVideo = false;
+  let stts = [], stsc = [], stco = [], stsz = [], stss = [], ctts = [], fixedSampleSize = 0;
+
+  function walk(s, e) {
+    let off = s;
+    while (off + 8 <= e) {
+      const sz = readU32(view, off), nm = read4cc(view, off + 4);
+      if (sz < 8) break;
+      const cs = off + 8, ce = Math.min(off + sz, e);
+      if (['mdia','minf','stbl'].includes(nm)) { walk(cs, ce); }
+      else if (nm === 'mdhd') { timescale = parseMdhd(view, cs, ce); }
+      else if (nm === 'hdlr') { if (parseHdlr(view, cs, ce)) isVideo = true; }
+      else if (nm === 'stts') {
+        const cnt = readU32(view, cs + 4);
+        for (let i = 0; i < cnt && cs + 8 + i*8 + 7 < ce; i++)
+          stts.push({ count: readU32(view, cs+8+i*8), delta: readU32(view, cs+8+i*8+4) });
+      }
+      else if (nm === 'stsc') {
+        const cnt = readU32(view, cs + 4);
+        for (let i = 0; i < cnt && cs + 8 + i*12 + 11 < ce; i++)
+          stsc.push({ firstChunk: readU32(view, cs+8+i*12), samplesPerChunk: readU32(view, cs+8+i*12+4) });
+      }
+      else if (nm === 'stco') {
+        const cnt = readU32(view, cs + 4);
+        for (let i = 0; i < cnt && cs + 8 + i*4 + 3 < ce; i++)
+          stco.push(readU32(view, cs+8+i*4));
+      }
+      else if (nm === 'co64') {
+        const cnt = readU32(view, cs + 4);
+        for (let i = 0; i < cnt && cs + 8 + i*8 + 7 < ce; i++)
+          stco.push(readU32(view, cs+8+i*8) * 0x100000000 + readU32(view, cs+8+i*8+4));
+      }
+      else if (nm === 'stsz') {
+        fixedSampleSize = readU32(view, cs + 4);
+        if (!fixedSampleSize) {
+          const cnt = readU32(view, cs + 8);
+          for (let i = 0; i < cnt && cs + 12 + i*4 + 3 < ce; i++)
+            stsz.push(readU32(view, cs+12+i*4));
+        }
+      }
+      else if (nm === 'stss') {
+        const cnt = readU32(view, cs + 4);
+        for (let i = 0; i < cnt && cs + 8 + i*4 + 3 < ce; i++)
+          stss.push(readU32(view, cs+8+i*4) - 1); // convert to 0-based
+      }
+      else if (nm === 'ctts') {
+        const cnt = readU32(view, cs + 4);
+        for (let i = 0; i < cnt && cs + 8 + i*8 + 7 < ce; i++)
+          ctts.push({ count: readU32(view, cs+8+i*8), offset: readU32(view, cs+8+i*8+4) });
+      }
+      off += sz;
+    }
+  }
+  walk(start, end);
+  if (!isVideo || !timescale) return null;
+  return { timescale, stts, stsc, stco, stsz, stss, ctts, fixedSampleSize, isVideo };
+}
+
+let isSeeking = false;
+
+function seekExact(t) {
+  return new Promise(resolve => {
+    const clamped = Math.max(0, Math.min(duration - 0.001, t));
+    let settled = false;
+    isSeeking = true;
+
+    function done() {
+      if (settled) return;
+      settled = true;
+      isSeeking = false;
+      video.removeEventListener('seeked', onSeeked);
+      resolve();
+    }
+
+    function onSeeked() {
+      if (settled) return;
+      if (video.requestVideoFrameCallback) {
+        video.requestVideoFrameCallback(() => done());
+      } else {
+        requestAnimationFrame(() => requestAnimationFrame(() => done()));
+      }
+    }
+
+    if (Math.abs(video.currentTime - clamped) < 0.0001) {
+      isSeeking = false; resolve(); return;
+    }
+    video.addEventListener('seeked', onSeeked);
+    video.currentTime = clamped;
+    setTimeout(done, 500);
+  });
+}
+
+// ── Thumbnails ──
+async function generateThumbnails() {
+  thumbCanvasStrip.innerHTML = '';
+  thumbStatus.style.display = 'block';
+  thumbStatus.textContent = '生成縮圖中…';
+  await new Promise(r => setTimeout(r, 100));
+
+  if (!video.videoWidth || !video.duration) {
+    thumbStatus.style.display = 'none'; return;
+  }
+
+  const W = thumbnailStrip.offsetWidth || 320;
+  const H = thumbnailStrip.offsetHeight || 50;
+  const vw = video.videoWidth || 16;
+  const vh = video.videoHeight || 9;
+  const aspect = vw / vh;
+  const tw = Math.round(H * aspect);
+  const count = Math.max(6, Math.round(W / tw));
+
+  for (let i = 0; i < count; i++) {
+    try {
+      await seekExact((i / count) * duration);
+      const c = document.createElement('canvas');
+      c.width = tw; c.height = H;
+      c.getContext('2d').drawImage(video, 0, 0, tw, H);
+      c.style.cssText = `width:${tw}px;height:${H}px;flex-shrink:0;`;
+      thumbCanvasStrip.appendChild(c);
+    } catch(e) {}
+  }
+
+  thumbStatus.style.display = 'none';
+  try { await seekExact(0); } catch(e) {}
+  updateUI();
+}
+
+// ── Play / Pause ──
+function setPlayIcon(on) {
+  if (on) {
+    playIcon.innerHTML = '<rect x="6" y="4" width="4" height="16" fill="#fff" stroke="#fff"/><rect x="14" y="4" width="4" height="16" fill="#fff" stroke="#fff"/>';
+    playLabel.textContent = '暫停';
+  } else {
+    playIcon.innerHTML = '<polygon fill="#fff" stroke="#fff" points="5 3 19 12 5 21 5 3"/>';
+    playLabel.textContent = '播放';
+  }
+  syncMiniPlayIcon(on);
+}
+
+playBtn.addEventListener('click', e => { e.stopPropagation(); togglePlay(); });
+
+function togglePlay() {
+  if (isSeeking) return; // don't interfere with seekExact's play/pause trick
+  if (frameMode) { toggleFrameMode(); hidePanel(); return; }
+  if (currentSpeed === 'frame') { toggleFrameMode(); hidePanel(); return; }
+  if (video.paused) {
+    video.play(); isPlaying = true; setPlayIcon(true); hidePanel();
+  } else {
+    video.pause(); isPlaying = false; setPlayIcon(false); clearTimeout(autoHideTimer);
+  }
+}
+
+// ── Frame mode ──
+function stopFrameMode() {
+  if (frameInterval) { clearInterval(frameInterval); frameInterval = null; }
+  frameMode = false;
+}
+function toggleFrameMode() {
+  if (frameMode) { stopFrameMode(); setPlayIcon(false); return; }
+  video.pause(); isPlaying = false;
+  frameMode = true; setPlayIcon(true);
+  const spf = 1 / fps;
+  frameInterval = setInterval(() => {
+    if (!frameMode) return;
+    const next = video.currentTime + spf;
+    if (next >= duration) { stopFrameMode(); setPlayIcon(false); return; }
+    const done = () => { video.removeEventListener('seeked', done); updateUI(); };
+    video.addEventListener('seeked', done);
+    video.currentTime = next;
+  }, 1000);
+}
+
+video.addEventListener('timeupdate', updateUI);
+video.addEventListener('ended', () => {
+  isPlaying = false; setPlayIcon(false); stopFrameMode(); clearTimeout(autoHideTimer);
+});
+
+// ── Speed buttons ──
+document.querySelectorAll('.speed-btn').forEach(btn => {
+  btn.addEventListener('click', e => {
+    e.stopPropagation();
+    document.querySelectorAll('.speed-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    stopFrameMode();
+    const s = btn.dataset.speed;
+    if (s === 'frame') {
+      video.pause(); isPlaying = false; currentSpeed = 'frame'; video.playbackRate = 1;
+      toggleFrameMode();
+    } else {
+      currentSpeed = parseFloat(s);
+      video.playbackRate = currentSpeed;
+      if (!video.paused) setPlayIcon(true);
+    }
+    resetAutoHide();
+  });
+});
+
+// ── ±5s ──
+document.getElementById('back5-btn').addEventListener('click', e => {
+  e.stopPropagation();
+  stopFrameMode(); video.currentTime = Math.max(0, video.currentTime - 5);
+  updateUI(); resetAutoHide();
+});
+document.getElementById('fwd5-btn').addEventListener('click', e => {
+  e.stopPropagation();
+  stopFrameMode(); video.currentTime = Math.min(duration, video.currentTime + 5);
+  updateUI(); resetAutoHide();
+});
+
+// ── Prev / Next frame with long-press ──
+function stepFrame(dir) {
+  stopFrameMode();
+  // Cancel any pending seekExact
+  isSeeking = false;
+  video.pause(); isPlaying = false; setPlayIcon(false);
+  const next = Math.max(0, Math.min(duration - 0.001, video.currentTime + dir / fps));
+  let settled = false;
+  function done() {
+    if (settled) return; settled = true;
+    video.removeEventListener('seeked', onSeeked);
+    updateUI();
+  }
+  function onSeeked() {
+    if (video.requestVideoFrameCallback) {
+      video.requestVideoFrameCallback(() => done());
+    } else {
+      requestAnimationFrame(() => requestAnimationFrame(() => done()));
+    }
+  }
+  video.addEventListener('seeked', onSeeked);
+  video.currentTime = next;
+  setTimeout(done, 400);
+}
+function setupLongPress(el, dir) {
+  let pt = null, rt = null;
+  function start(e) {
+    e.preventDefault(); e.stopPropagation();
+    stepFrame(dir);
+    pt = setTimeout(() => { rt = setInterval(() => stepFrame(dir), 80); }, 380);
+  }
+  function stop() { clearTimeout(pt); clearInterval(rt); pt = null; rt = null; }
+  el.addEventListener('touchstart', start, { passive: false });
+  el.addEventListener('touchend', stop);
+  el.addEventListener('touchcancel', stop);
+  el.addEventListener('mousedown', start);
+  el.addEventListener('mouseup', stop);
+  el.addEventListener('mouseleave', stop);
+}
+setupLongPress(document.getElementById('prev-frame-btn'), -1);
+setupLongPress(document.getElementById('next-frame-btn'), +1);
+// Wire mini frame buttons with same long-press
+setupLongPress(document.getElementById('mini-prev'), -1);
+setupLongPress(document.getElementById('mini-next'), +1);
+
+// ── Timeline scrub ──
+let isScrubbing = false;
+let scrubTargetTime = 0;
+let scrubRaf = null;
+
+function scrubAt(cx, commit) {
+  const r = thumbnailStrip.getBoundingClientRect();
+  scrubTargetTime = Math.max(0, Math.min(1, (cx - r.left) / r.width)) * duration;
+  if (commit) {
+    seekExact(scrubTargetTime).then(() => updateUI());
+  } else {
+    if (!scrubRaf) {
+      scrubRaf = requestAnimationFrame(() => {
+        scrubRaf = null;
+        const pct = scrubTargetTime / duration;
+        const indicator = document.getElementById('timeline-indicator');
+        if (indicator) indicator.style.left = (pct * 100) + '%';
+        if (timeDisplay) timeDisplay.textContent = formatTime(scrubTargetTime);
+        const f = Math.round(scrubTargetTime * fps);
+        if (frameDisplay) frameDisplay.textContent = `F: ${f}`;
+      });
+    }
+  }
+}
+
+thumbnailStrip.addEventListener('touchstart', e => {
+  e.stopPropagation(); isScrubbing = true;
+  stopFrameMode(); video.pause(); isPlaying = false; setPlayIcon(false);
+  scrubAt(e.touches[0].clientX, false);
+}, { passive: false });
+thumbnailStrip.addEventListener('touchmove', e => {
+  if (!isScrubbing) return;
+  e.preventDefault(); e.stopPropagation();
+  scrubAt(e.touches[0].clientX, false);
+}, { passive: false });
+thumbnailStrip.addEventListener('touchend', e => {
+  if (!isScrubbing) return;
+  isScrubbing = false;
+  scrubAt(e.changedTouches[0].clientX, true); // seek only on release
+});
+thumbnailStrip.addEventListener('touchcancel', () => {
+  isScrubbing = false;
+  video.currentTime = scrubTargetTime;
+  updateUI();
+});
+thumbnailStrip.addEventListener('mousedown', e => {
+  e.stopPropagation(); isScrubbing = true;
+  stopFrameMode(); video.pause(); isPlaying = false; setPlayIcon(false);
+  scrubAt(e.clientX, false);
+});
+document.addEventListener('mousemove', e => { if (isScrubbing) scrubAt(e.clientX, false); });
+document.addEventListener('mouseup', e => {
+  if (!isScrubbing) return;
+  isScrubbing = false;
+  scrubAt(e.clientX, true);
+});
+
+// ── Progress bar scrub ──
+const progressWrap = document.getElementById('progress-bar-wrap');
+function scrubProg(cx) {
+  const r = progressWrap.getBoundingClientRect();
+  video.currentTime = Math.max(0, Math.min(1, (cx - r.left) / r.width)) * duration;
+  updateUI();
+}
+progressWrap.addEventListener('touchstart', e => {
+  e.stopPropagation(); scrubProg(e.touches[0].clientX);
+  stopFrameMode(); video.pause(); isPlaying = false; setPlayIcon(false);
+}, { passive: true });
+progressWrap.addEventListener('touchmove', e => scrubProg(e.touches[0].clientX), { passive: true });
+progressWrap.addEventListener('mousedown', e => { e.stopPropagation(); scrubProg(e.clientX); });
+
+// ── Loop range ──
+let loopIn = null, loopOut = null, loopActive = false;
+const loopRangeOverlay = document.getElementById('loop-range-overlay');
+const loopRangeDisplay = document.getElementById('loop-range-display');
+const loopToggleBtn    = document.getElementById('loop-toggle');
+const loopSetInBtn     = document.getElementById('loop-set-in');
+const loopSetOutBtn    = document.getElementById('loop-set-out');
+
+function updateLoopOverlay() {
+  if (loopIn !== null && loopOut !== null && duration > 0) {
+    const l = (loopIn / duration) * 100;
+    const w = ((loopOut - loopIn) / duration) * 100;
+    loopRangeOverlay.style.left  = l + '%';
+    loopRangeOverlay.style.width = w + '%';
+    loopRangeOverlay.classList.add('show');
+    loopRangeDisplay.textContent = `${formatTime(loopIn)} → ${formatTime(loopOut)}`;
+  } else {
+    loopRangeOverlay.classList.remove('show');
+    loopRangeDisplay.textContent = '—';
+  }
+}
+
+loopSetInBtn.addEventListener('click', e => {
+  e.stopPropagation();
+  loopIn = video.currentTime;
+  if (loopOut !== null && loopIn >= loopOut) loopOut = null;
+  loopSetInBtn.classList.add('set');
+  loopSetOutBtn.classList.toggle('set', loopOut !== null);
+  updateLoopOverlay();
+  showToast(`IN: ${formatTime(loopIn)}`);
+  resetAutoHide();
+});
+
+loopSetOutBtn.addEventListener('click', e => {
+  e.stopPropagation();
+  loopOut = video.currentTime;
+  if (loopIn !== null && loopOut <= loopIn) loopIn = null;
+  loopSetOutBtn.classList.add('set');
+  loopSetInBtn.classList.toggle('set', loopIn !== null);
+  updateLoopOverlay();
+  showToast(`OUT: ${formatTime(loopOut)}`);
+  resetAutoHide();
+});
+
+loopToggleBtn.addEventListener('click', e => {
+  e.stopPropagation();
+  if (loopIn === null || loopOut === null) {
+    showToast('請先設定 IN / OUT'); resetAutoHide(); return;
+  }
+  loopActive = !loopActive;
+  loopToggleBtn.classList.toggle('active', loopActive);
+  if (loopActive) {
+    video.currentTime = loopIn;
+    if (video.paused) togglePlay();
+    showToast('循環播放開啟');
+  } else {
+    showToast('循環播放關閉');
+  }
+  resetAutoHide();
+});
+
+document.getElementById('loop-clear').addEventListener('click', e => {
+  e.stopPropagation();
+  resetLoop();
+  showToast('已清除範圍');
+  resetAutoHide();
+});
+
+// Monitor loop: jump back to IN when OUT is reached
+video.addEventListener('timeupdate', () => {
+  if (loopActive && loopOut !== null && video.currentTime >= loopOut) {
+    video.currentTime = loopIn;
+  }
+});
+
+// Reset loop when loading new file
+function resetLoop() {
+  loopIn = null; loopOut = null; loopActive = false;
+  loopToggleBtn.classList.remove('active');
+  loopSetInBtn.classList.remove('set');
+  loopSetOutBtn.classList.remove('set');
+  updateLoopOverlay();
+}
+
+// ── Save frame PNG ──
+document.getElementById('save-btn').addEventListener('click', e => {
+  e.stopPropagation();
+  video.pause(); isPlaying = false; setPlayIcon(false);
+  const w = video.videoWidth, h = video.videoHeight;
+  hiddenCanvas.width = w; hiddenCanvas.height = h;
+  const ctx = hiddenCanvas.getContext('2d');
+  ctx.imageSmoothingEnabled = false;
+  ctx.drawImage(video, 0, 0, w, h);
+  const frame = Math.round(video.currentTime * fps);
+  const tc = formatTime(video.currentTime).replace(/[:.]/g, '_');
+  hiddenCanvas.toBlob(blob => {
+    if (!blob) { showToast('截圖失敗'); return; }
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `frame_${String(frame).padStart(6,'0')}_${tc}.png`;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 2000);
+    showToast(`已儲存 Frame ${frame}（PNG）`);
+  }, 'image/png');
+  resetAutoHide();
+});
+
+// Prevent control taps from toggling play
+controls.addEventListener('click', e => e.stopPropagation());
+
+// ── Wake Lock: keep screen on while video is loaded ──
+let wakeLock = null;
+
+async function requestWakeLock() {
+  if (!('wakeLock' in navigator)) return;
+  try {
+    wakeLock = await navigator.wakeLock.request('screen');
+  } catch(e) {}
+}
+
+async function releaseWakeLock() {
+  if (wakeLock) { try { await wakeLock.release(); } catch(e) {} wakeLock = null; }
+}
+
+// Re-acquire after tab becomes visible again (iOS releases it on background)
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && playerScreen.style.display !== 'none') {
+    requestWakeLock();
+  }
+});
+
+// ── Export clip (FFmpeg.wasm) ──
+const exportOverlay   = document.getElementById('export-overlay');
+const exportStatus    = document.getElementById('export-status');
+const exportProgressF = document.getElementById('export-progress-fill');
+const exportCancelBtn = document.getElementById('export-cancel');
+let ffmpegInstance = null;
+let ffmpegLoaded = false;
+let exportCancelled = false;
+
+document.getElementById('loop-export').addEventListener('click', async e => {
+  e.stopPropagation();
+
+  if (loopIn === null || loopOut === null) {
+    showToast('請先設定 IN / OUT'); return;
+  }
+  if (!currentFile) { showToast('沒有影片檔案'); return; }
+
+  savePendingClip();
+
+  exportCancelled = false;
+  exportOverlay.classList.add('show');
+  exportStatus.textContent = '分析影片結構…';
+  exportProgressF.style.width = '5%';
+
+  try {
+    const srcExt = (currentFile.name.split('.').pop() || 'mp4').toLowerCase();
+    const formatSel = document.getElementById('export-format').value;
+    const outExt = formatSel === 'original' ? srcExt : formatSel;
+    const ss   = loopIn.toFixed(3);
+    const base = currentFile.name.replace(/\.[^.]+$/, '') || 'clip';
+
+    let blob;
+
+    if (outExt === srcExt) {
+      // ── Pure JS: no FFmpeg needed ──
+      exportStatus.textContent = '提取片段…';
+      exportProgressF.style.width = '20%';
+      blob = await extractClipBlob(currentFile, loopIn, loopOut);
+      exportProgressF.style.width = '90%';
+      exportStatus.textContent = `輸出 ${(blob.size/1024/1024).toFixed(0)}MB…`;
+
+    } else {
+      // ── Format conversion: use FFmpeg ──
+      const { createFFmpeg, fetchFile } = FFmpeg;
+      exportStatus.textContent = '提取片段…';
+      let inputBlob;
+      try { inputBlob = await extractClipBlob(currentFile, loopIn, loopOut); }
+      catch(e) { inputBlob = currentFile; }
+      exportProgressF.style.width = '20%';
+      exportStatus.textContent = `轉換格式，載入 FFmpeg…`;
+
+      if (!ffmpegInstance) {
+        ffmpegInstance = createFFmpeg({ log:false, corePath: window.location.origin+'/ffmpeg/ffmpeg-core.js' });
+      }
+      if (!ffmpegLoaded) { await ffmpegInstance.load(); ffmpegLoaded = true; }
+
+      ffmpegInstance.setProgress(({ ratio }) => {
+        if (ratio >= 0) exportProgressF.style.width = Math.min(95, 25+Math.round(ratio*70))+'%';
+      });
+
+      if (exportCancelled) { exportOverlay.classList.remove('show'); return; }
+
+      const dur = (loopOut - loopIn).toFixed(3);
+      const inName = 'input.'+srcExt, outName = 'clip.'+outExt;
+      ffmpegInstance.FS('writeFile', inName, await fetchFile(inputBlob));
+      await ffmpegInstance.run(
+        '-ss', ss, '-i', inName, '-t', dur,
+        '-map','0:v:0','-map','0:a:0?',
+        '-c:v','libx264','-preset','ultrafast','-crf','18',
+        '-c:a','aac','-b:a','128k','-movflags','+faststart', outName
+      );
+      const data = ffmpegInstance.FS('readFile', outName);
+      blob = new Blob([data.buffer], { type: outExt==='mov'?'video/quicktime':'video/mp4' });
+      try { ffmpegInstance.FS('unlink', inName); } catch(e2) {}
+      try { ffmpegInstance.FS('unlink', outName); } catch(e2) {}
+    }
+
+    if (exportCancelled) { exportOverlay.classList.remove('show'); return; }
+
+    const url = URL.createObjectURL(blob);
+    const a   = document.createElement('a');
+    a.href = url;
+    a.download = `${base}_clip_${ss.replace('.','_')}.${outExt}`;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 3000);
+
+    exportProgressF.style.width = '100%';
+    exportStatus.textContent = '完成！';
+    setTimeout(() => exportOverlay.classList.remove('show'), 1500);
+    showToast('剪輯完成');
+    clearPendingClip();
+
+  } catch(err) {
+    exportOverlay.classList.remove('show');
+    const msg = err?.message || err?.toString() || JSON.stringify(err) || '未知錯誤';
+    showToast('剪輯失敗：' + msg);
+    clearPendingClip();
+  }
+});
+
+exportCancelBtn.addEventListener('click', () => {
+  exportCancelled = true;
+  if (ffmpegInstance) { try { ffmpegInstance.exit(); } catch(e) {} }
+  ffmpegInstance = null;
+  ffmpegLoaded = false;
+  exportOverlay.classList.remove('show');
+  showToast('已取消');
+});
+
+// ── Convert only (no clip, -c copy) ──
+document.getElementById('loop-convert').addEventListener('click', async e => {
+  e.stopPropagation();
+  if (!currentFile) { showToast('沒有影片檔案'); return; }
+
+  const formatSel = document.getElementById('export-format').value;
+  const srcExt = currentFile.name.split('.').pop().toLowerCase();
+  const outExt = formatSel === 'original' ? srcExt : formatSel;
+
+  if (outExt === srcExt) {
+    showToast('格式相同，無需轉換'); return;
+  }
+
+  const base = currentFile.name.replace(/\.[^.]+$/, '') || 'video';
+
+  // iPhone MOV ↔ MP4: both are ISOBMFF containers — just rebrand, no FFmpeg needed
+  const isISOSwap = (srcExt === 'mov' && outExt === 'mp4') ||
+                    (srcExt === 'mp4' && outExt === 'mov');
+  if (isISOSwap) {
+    const mimeType = outExt === 'mp4' ? 'video/mp4' : 'video/quicktime';
+    const blob = new Blob([currentFile], { type: mimeType });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    a.href = url;
+    a.download = `${base}.${outExt}`;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 3000);
+    showToast(`轉換完成 → ${outExt.toUpperCase()}`);
+    return;
+  }
+
+  // Other format conversions: use FFmpeg
+  const sizeMB2 = currentFile.size / 1024 / 1024;
+  const isIOS2 = /iP(hone|ad|od)/.test(navigator.userAgent);
+  const limitMB2 = isIOS2 ? 200 : 800;
+  if (sizeMB2 > limitMB2) {
+    showToast(`檔案 ${sizeMB2.toFixed(0)}MB 太大，${isIOS2 ? 'iOS 建議 200MB 以下' : '建議 800MB 以下'}`);
+    return;
+  }
+
+  exportCancelled = false;
+  exportOverlay.classList.add('show');
+  exportStatus.textContent = '準備中…';
+  exportProgressF.style.width = '0%';
+
+  try {
+    const { createFFmpeg, fetchFile } = FFmpeg;
+
+    if (!ffmpegInstance) {
+      ffmpegInstance = createFFmpeg({
+        log: false,
+        corePath: window.location.origin + '/ffmpeg/ffmpeg-core.js',
+      });
+    }
+    if (!ffmpegLoaded) {
+      exportStatus.textContent = '載入 FFmpeg…（首次約需 30 秒）';
+      await ffmpegInstance.load();
+      ffmpegLoaded = true;
+    }
+
+    if (exportCancelled) { exportOverlay.classList.remove('show'); return; }
+
+    exportStatus.textContent = '寫入檔案…';
+    exportProgressF.style.width = '10%';
+
+    const inName = 'input.' + srcExt;
+    ffmpegInstance.FS('writeFile', inName, await fetchFile(currentFile));
+
+    if (exportCancelled) { exportOverlay.classList.remove('show'); return; }
+
+    exportStatus.textContent = `轉換 ${srcExt.toUpperCase()} → ${outExt.toUpperCase()}…`;
+    exportProgressF.style.width = '20%';
+
+    const outName = 'output.' + outExt;
+    await ffmpegInstance.run(
+      '-i', inName,
+      '-c', 'copy',
+      '-movflags', '+faststart',
+      outName
+    );
+
+    if (exportCancelled) { exportOverlay.classList.remove('show'); return; }
+
+    exportProgressF.style.width = '95%';
+    exportStatus.textContent = '輸出中…';
+
+    const mimeType = outExt === 'mov' ? 'video/quicktime' : 'video/mp4';
+    const data = ffmpegInstance.FS('readFile', outName);
+    const blob = new Blob([data.buffer], { type: mimeType });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    a.href = url;
+    a.download = `${base}.${outExt}`;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 3000);
+
+    try { ffmpegInstance.FS('unlink', inName); } catch(e) {}
+    try { ffmpegInstance.FS('unlink', outName); } catch(e) {}
+
+    exportProgressF.style.width = '100%';
+    exportStatus.textContent = '完成！';
+    setTimeout(() => exportOverlay.classList.remove('show'), 1500);
+    showToast(`轉換完成 → ${outExt.toUpperCase()}`);
+    localStorage.removeItem('pendingClip');
+
+  } catch(err) {
+    exportOverlay.classList.remove('show');
+    showToast('轉換失敗：' + (err.message || err));
+  }
+});
+
+// ── Pending clip: save before export, clear after, resume on reload ──
+function savePendingClip() {
+  if (loopIn === null || loopOut === null || !currentFile) return;
+  const existing = JSON.parse(localStorage.getItem('pendingClip') || '{}');
+  const crashCount = (existing.crashCount || 0) + 1;
+  localStorage.setItem('pendingClip', JSON.stringify({
+    loopIn, loopOut,
+    fileName: currentFile.name,
+    fileSize: currentFile.size,
+    format: document.getElementById('export-format').value,
+    crashCount,
+  }));
+}
+
+function clearPendingClip() {
+  localStorage.removeItem('pendingClip');
+}
+
+// Check for pending clip on load
+window.addEventListener('load', () => {
+  const raw = localStorage.getItem('pendingClip');
+  if (!raw) return;
+  try {
+    const p = JSON.parse(raw);
+    const crashCount = p.crashCount || 1;
+
+    // If crashed too many times, show warning instead of auto-retry option
+    const tooManyCrashes = crashCount >= 2;
+
+    const banner = document.createElement('div');
+    banner.id = 'resume-banner';
+    banner.style.cssText = `
+      position: fixed; bottom: 80px; left: 50%; transform: translateX(-50%);
+      z-index: 99999; background: rgba(10,10,12,0.95);
+      border: 1.5px solid rgba(200,255,71,0.4);
+      border-radius: 14px; padding: 14px 18px; max-width: 320px; width: 90%;
+      font-family: 'DM Mono', monospace; font-size: 12px; color: #fff;
+      text-align: center; line-height: 1.7;
+    `;
+    banner.innerHTML = `
+      <div style="color:var(--accent);font-size:13px;margin-bottom:6px">
+        ${tooManyCrashes ? '⚠ 多次中斷，建議改用電腦' : '⚠ 上次剪輯未完成'}
+      </div>
+      <div style="color:rgba(255,255,255,0.6);margin-bottom:10px">
+        ${p.fileName}<br>
+        IN ${formatTime(p.loopIn)} → OUT ${formatTime(p.loopOut)}<br>
+        ${tooManyCrashes ? `<span style="color:rgba(255,100,100,0.8)">已中斷 ${crashCount} 次，檔案可能太大</span>` : ''}
+      </div>
+      <div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap">
+        ${!tooManyCrashes ? `<button id="resume-select" style="
+          background:transparent;border:1.5px solid rgba(200,255,71,0.5);
+          border-radius:100px;padding:6px 14px;color:var(--accent);
+          font-family:'DM Mono',monospace;font-size:12px;cursor:pointer;">
+          重新選擇繼續
+        </button>` : ''}
+        <button id="resume-cancel" style="
+          background:transparent;border:1.5px solid rgba(255,255,255,0.15);
+          border-radius:100px;padding:6px 14px;color:rgba(255,255,255,0.4);
+          font-family:'DM Mono',monospace;font-size:12px;cursor:pointer;">
+          ${tooManyCrashes ? '清除記錄' : '取消'}
+        </button>
+      </div>
+    `;
+    document.body.appendChild(banner);
+
+    document.getElementById('resume-cancel').addEventListener('click', () => {
+      clearPendingClip();
+      banner.remove();
+    });
+
+    if (!tooManyCrashes) {
+      document.getElementById('resume-select').addEventListener('click', () => {
+        banner.remove();
+        const inp = document.createElement('input');
+        inp.type = 'file'; inp.accept = 'video/*';
+        inp.style.display = 'none';
+        document.body.appendChild(inp);
+        inp.addEventListener('change', async () => {
+          const file = inp.files[0];
+          if (!file) { inp.remove(); return; }
+          if (file.name !== p.fileName || file.size !== p.fileSize) {
+            inp.remove();
+            showToast('請選擇同一支影片：' + p.fileName); return;
+          }
+          // Keep inp in DOM until loadVideoFile completes — removing it too early
+          // invalidates the File object on iOS Safari
+          inp.style.display = 'none';
+          loadVideoFile(file);
+          video.addEventListener('canplay', async function once() {
+            video.removeEventListener('canplay', once);
+            loopIn = p.loopIn;
+            loopOut = p.loopOut;
+            loopSetInBtn.classList.add('set');
+            loopSetOutBtn.classList.add('set');
+            updateLoopOverlay();
+            document.getElementById('export-format').value = p.format || 'original';
+            await new Promise(r => setTimeout(r, 500));
+            inp.remove(); // safe to remove now
+            window._resumeSkipSizeCheck = true;
+            document.getElementById('loop-export').click();
+          }, { once: true });
+        });
+        inp.click();
+      });
+    }
+  } catch(e) {
+    clearPendingClip();
+  }
+});
+</script>
+</body>
+</html>
