@@ -922,8 +922,7 @@ function openFilePicker() {
     renderPlaylist();
     if (wasEmpty && currentIndex === -1) { currentIndex = 0; loadVideoFromQueue(0, true); }
   });
-  // small timeout required on iOS to separate from current event loop
-  setTimeout(() => inp.click(), 10);
+  inp.click();
 }
 
 /* ── Upload zone tap → picker ── */
