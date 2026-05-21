@@ -461,28 +461,26 @@
   #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
 
   #playlist-panel {
-    max-height: 130px; overflow-y: auto;
-    padding: 4px 12px 8px;
-    font-family: 'DM Mono', monospace; font-size: 11px;
-    color: rgba(255,255,255,0.7);
-    border-top: 1px solid rgba(255,255,255,0.08);
-    -webkit-overflow-scrolling: touch;
+    max-height: 120px; overflow-y: auto; -webkit-overflow-scrolling: touch;
+    padding: 2px 12px 8px; border-top: 1px solid rgba(255,255,255,0.08);
     position: relative; z-index: 35;
   }
-  .playlist-header {
+  .pl-header {
+    font-family: 'DM Mono', monospace; font-size: 10px;
     text-transform: uppercase; letter-spacing: 0.18em;
-    font-size: 10px; color: rgba(255,255,255,0.35); padding: 4px 0 3px;
+    color: rgba(255,255,255,0.3); padding: 4px 0 2px;
   }
-  #playlist-list { list-style:none; margin:0; padding:0; }
-  #playlist-list li {
-    display:flex; align-items:center; gap:6px;
-    padding:4px 0; cursor:pointer;
-    -webkit-tap-highlight-color: rgba(200,255,71,0.15);
+  #playlist-list { list-style: none; margin: 0; padding: 0; }
+  #playlist-list .pl-item {
+    display: flex; align-items: center; gap: 6px;
+    padding: 4px 0; cursor: pointer; font-family: 'DM Mono', monospace;
+    font-size: 11px; color: rgba(255,255,255,0.65);
+    -webkit-tap-highlight-color: rgba(200,255,71,0.12);
   }
-  #playlist-list li.current { color: var(--accent2); }
-  .playlist-index { width:18px; text-align:right; opacity:0.45; flex-shrink:0; }
-  .playlist-name { flex:1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-  .pl-del { flex-shrink:0; opacity:0.3; font-size:13px; padding:0 2px; color:#fff; }
+  #playlist-list .pl-item.current { color: var(--accent2); }
+  .pl-idx { width: 16px; text-align: right; opacity: 0.4; flex-shrink: 0; }
+  .pl-name { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .pl-del { flex-shrink: 0; font-size: 12px; opacity: 0.3; padding: 0 2px; color: #fff; }
 </style>
 
 <script>
@@ -640,16 +638,13 @@ if ('serviceWorker' in navigator) {
       <button id="loop-export">✂</button>
       <button id="loop-convert">⇄</button>
     </div>
-    <div id="playlist-panel" style="display:none;">
-      <div class="playlist-header">播放佇列</div>
-      <ul id="playlist-list"></ul>
-    </div>
   </div>
 </div>
 
 <div id="export-overlay">
   <p id="export-status">準備中…</p>
   <div id="export-progress-bar"><div id="export-progress-fill"></div></div>
+  <button id="export-download-btn" style="display:none;background:transparent;border:1.5px solid var(--accent);border-radius:100px;padding:10px 24px;color:var(--accent);font-family:'DM Mono',monospace;font-size:14px;cursor:pointer;margin-top:4px;">下載</button>
   <button id="export-cancel">取消</button>
 </div>
 
@@ -678,15 +673,8 @@ const miniBar           = document.getElementById('mini-bar');
 const miniPlayIcon      = document.getElementById('mini-play-icon');
 const timeOverlay       = document.getElementById('time-overlay');
 
-let playlist = [];
-let currentIndex = -1;
-let autoPlayNext = true;
-let skipThumbOnLoad = false;
+let playlist = []; let currentIndex = -1; let autoPlayNext = true; let skipThumbOnLoad = false;
 let fps = 30;       // will be updated after detection
-let playlist = [];
-let currentIndex = -1;
-let autoPlayNext = true;
-let skipThumbOnLoad = false;
 let fpsDetected = false;
 let duration = 0;
 let isPlaying = false;
@@ -877,72 +865,33 @@ fileInput.addEventListener('change', e => {
   const f = e.target.files && e.target.files[0];
   if (!f) return;
   fileInput.value = '';
-  const wasEmpty = playlist.length === 0;
   playlist.push({ file: f, name: f.name });
-  renderPlaylist();
-  if (wasEmpty) { currentIndex = 0; loadVideoFromQueue(0, true); }
-  else showToast('已加入佇列 (' + playlist.length + ')');
+  if (currentIndex === -1) {
+    currentIndex = 0;
+    loadVideoFile(f);
+    renderPlaylist();
+  } else {
+    renderPlaylist();
+    showToast('已加入佇列 (' + playlist.length + ')');
+  }
 });
 changeInput.addEventListener('change', e => {
   const f = e.target.files && e.target.files[0];
   if (!f) return;
   changeInput.value = '';
-  const wasEmpty = playlist.length === 0;
   playlist.push({ file: f, name: f.name });
-  renderPlaylist();
-  if (wasEmpty) { currentIndex = 0; loadVideoFromQueue(0, true); }
-  else showToast('已加入佇列 (' + playlist.length + ')');
+  if (currentIndex === -1) {
+    currentIndex = 0;
+    loadVideoFile(f);
+    renderPlaylist();
+  } else {
+    renderPlaylist();
+    showToast('已加入佇列 (' + playlist.length + ')');
+  }
 });
 document.getElementById('change-video-btn').addEventListener('click', e => {
   e.stopPropagation(); changeInput.click();
 });
-
-
-/* ── Playlist ── */
-function loadVideoFromQueue(index, withThumb) {
-  if (index < 0 || index >= playlist.length) return;
-  currentIndex = index;
-  skipThumbOnLoad = !withThumb;
-  loadVideoFile(playlist[index].file);
-  renderPlaylist();
-}
-
-const playlistList  = document.getElementById('playlist-list');
-const playlistPanel = document.getElementById('playlist-panel');
-
-function renderPlaylist() {
-  if (!playlistList) return;
-  playlistList.innerHTML = '';
-  playlist.forEach((item, i) => {
-    const li = document.createElement('li');
-    li.className = i === currentIndex ? 'current' : '';
-    const idxEl  = document.createElement('span');
-    idxEl.className = 'playlist-index';
-    idxEl.textContent = i + 1;
-    const nameEl = document.createElement('span');
-    nameEl.className = 'playlist-name';
-    nameEl.textContent = item.name;
-    const delEl  = document.createElement('span');
-    delEl.className = 'pl-del';
-    delEl.textContent = '✕';
-    delEl.addEventListener('click', ev => {
-      ev.stopPropagation();
-      playlist.splice(i, 1);
-      if (currentIndex >= playlist.length) currentIndex = playlist.length - 1;
-      renderPlaylist();
-    });
-    li.appendChild(idxEl);
-    li.appendChild(nameEl);
-    li.appendChild(delEl);
-    li.addEventListener('click', ev => {
-      ev.stopPropagation();
-      loadVideoFromQueue(i, true);
-    });
-    playlistList.appendChild(li);
-  });
-  if (playlistPanel) playlistPanel.style.display = playlist.length > 1 ? 'block' : 'none';
-}
-/* ─────────────── */
 
 function loadVideoFile(file) {
   stopFrameMode();
@@ -1024,12 +973,8 @@ function onMetaLoaded() {
   updateLoopOverlay();
   detectFPS().then(() => {
     updateUI();
-    if (skipThumbOnLoad) {
-      skipThumbOnLoad = false;
-      thumbStatus.style.display = 'none';
-    } else {
-      generateThumbnails();
-    }
+    if (skipThumbOnLoad) { skipThumbOnLoad = false; thumbStatus.style.display = 'none'; }
+    else { generateThumbnails(); }
   });
 }
 
@@ -1325,7 +1270,14 @@ video.addEventListener('timeupdate', updateUI);
 video.addEventListener('ended', () => {
   stopFrameMode(); clearTimeout(autoHideTimer);
   if (autoPlayNext && currentIndex >= 0 && currentIndex + 1 < playlist.length) {
-    loadVideoFromQueue(currentIndex + 1, false);
+    currentIndex++;
+    skipThumbOnLoad = true;
+    loadVideoFile(playlist[currentIndex].file);
+    renderPlaylist();
+    video.addEventListener('canplay', function autoPlay() {
+      video.removeEventListener('canplay', autoPlay);
+      video.play(); isPlaying = true; setPlayIcon(true);
+    });
     return;
   }
   isPlaying = false; setPlayIcon(false);
@@ -1576,7 +1528,7 @@ let exportCancelled = false;
    No WASM. Supports any file size.
    ═══════════════════════════════════════════════ */
 
-/* ── helpers hoisted for Safari scope ── */
+/* ── top-level helpers (hoisted for Safari scope) ── */
 
 function ru32(v, o) { return v.getUint32(o, false); }
 
@@ -2262,6 +2214,7 @@ document.getElementById('loop-export').addEventListener('click', async e => {
   const mimeType = ext === 'mov' ? 'video/quicktime' : 'video/mp4';
   const dlBtn    = document.getElementById('export-download-btn');
 
+  /* waitForUserDownload: show download button, wait for tap, then trigger download */
   function waitForUserDownload(blob, filename, label) {
     return new Promise((resolve, reject) => {
       dlBtn.textContent = label;
@@ -2274,18 +2227,20 @@ document.getElementById('loop-export').addEventListener('click', async e => {
         const a   = document.createElement('a');
         a.href = url; a.download = filename;
         document.body.appendChild(a); a.click(); document.body.removeChild(a);
-        setTimeout(() => URL.revokeObjectURL(url), 500);
-        setTimeout(() => resolve(), 900);
+        setTimeout(() => URL.revokeObjectURL(url), 30000);
+        resolve();
       }
       dlBtn.addEventListener('click', onTap);
     });
   }
 
+  /* downloadParts: assemble blob and prompt user to tap download */
   async function downloadParts(parts, filename, label) {
     const blob = new Blob(parts, { type: mimeType });
     await waitForUserDownload(blob, filename, label);
   }
 
+  /* processTrimSegment */
   async function processTrimSegment(segIn, segOut, filename, partLabel, baseProgress, progressRange) {
     if (exportCancelled) throw new Error('cancelled');
     exportStatus.textContent = `${partLabel}分析中…`;
@@ -2307,8 +2262,11 @@ document.getElementById('loop-export').addEventListener('click', async e => {
       const batches = [];
       for (const s of orderedSamples) {
         const last = batches[batches.length - 1];
-        if (last && last.srcEnd === s.fileStart) { last.srcEnd = s.fileStart + s.size; }
-        else batches.push({ srcStart: s.fileStart, srcEnd: s.fileStart + s.size });
+        if (last && last.srcEnd === s.fileStart) {
+          last.srcEnd = s.fileStart + s.size;
+        } else {
+          batches.push({ srcStart: s.fileStart, srcEnd: s.fileStart + s.size });
+        }
       }
 
       const readBase  = baseProgress + Math.round(progressRange * 0.68);
@@ -2320,7 +2278,8 @@ document.getElementById('loop-export').addEventListener('click', async e => {
         while (pos < batch.srcEnd) {
           if (exportCancelled) throw new Error('cancelled');
           const chunkEnd = Math.min(pos + PIECE, batch.srcEnd);
-          parts.push(await readChunk(pos, chunkEnd));
+          const chunk = await readChunk(pos, chunkEnd);
+          parts.push(chunk);
           readBytes += chunkEnd - pos;
           pos = chunkEnd;
           exportProgressF.style.width = Math.round(readBase + readRange * readBytes / totalBytes) + '%';
@@ -2328,9 +2287,11 @@ document.getElementById('loop-export').addEventListener('click', async e => {
           await new Promise(r => setTimeout(r, 0));
         }
       }
+
       exportProgressF.style.width = Math.round(baseProgress + progressRange * 0.98) + '%';
       exportStatus.textContent = `${partLabel}準備下載…`;
-      await downloadParts(parts, filename, partLabel ? `⬇ 下載 ${partLabel}` : '⬇ 下載剪輯');
+      const dlLabel = partLabel ? `⬇ 下載 ${partLabel}` : '⬇ 下載剪輯';
+      await downloadParts(parts, filename, dlLabel);
 
     } else {
       exportStatus.textContent = `${partLabel}即時錄製…`;
@@ -2340,7 +2301,9 @@ document.getElementById('loop-export').addEventListener('click', async e => {
         exportStatus.textContent = `${partLabel}${msg}`;
       });
       if (exportCancelled) throw new Error('cancelled');
-      await waitForUserDownload(blob, `${base}_clip.${outExt}`, partLabel ? `⬇ 下載 ${partLabel}` : '⬇ 下載剪輯');
+      const dlLabel = partLabel ? `⬇ 下載 ${partLabel}` : '⬇ 下載剪輯';
+      const blobObj = blob;
+      await waitForUserDownload(blobObj, `${base}_clip${partLabel ? '_'+partLabel.replace(/[()\/]/g,'') : ''}.${outExt}`, dlLabel);
     }
   }
 
@@ -2354,17 +2317,22 @@ document.getElementById('loop-export').addEventListener('click', async e => {
       const segDur = clipDuration / nParts;
       showToast(`預估 ${(estimatedSize/1024/1024).toFixed(0)}MB，分割為 ${nParts} 個檔案`);
       await new Promise(r => setTimeout(r, 800));
+
       for (let i = 0; i < nParts; i++) {
         if (exportCancelled) { exportOverlay.classList.remove('show'); dlBtn.style.display='none'; return; }
         const segIn  = loopIn + i * segDur;
         const segOut = Math.min(loopIn + (i + 1) * segDur, loopOut);
         const suffix  = String(i + 1).padStart(2, '0');
-        await processTrimSegment(segIn, segOut, `${base}_clip_part${suffix}.${ext}`,
-          `(${i+1}/${nParts}) `, Math.round(100*i/nParts), Math.round(100/nParts));
+        const filename = `${base}_clip_part${suffix}.${ext}`;
+        const partLabel = `(${i+1}/${nParts}) `;
+        const baseProgress  = Math.round(100 * i / nParts);
+        const progressRange = Math.round(100 / nParts);
+        await processTrimSegment(segIn, segOut, filename, partLabel, baseProgress, progressRange);
       }
     } else {
       const ss = loopIn.toFixed(3);
-      await processTrimSegment(loopIn, loopOut, `${base}_clip_${ss.replace('.','_')}.${ext}`, '', 0, 100);
+      const filename = `${base}_clip_${ss.replace('.','_')}.${ext}`;
+      await processTrimSegment(loopIn, loopOut, filename, '', 0, 100);
     }
 
     dlBtn.style.display = 'none';
@@ -2415,6 +2383,38 @@ document.getElementById('loop-convert').addEventListener('click', async e => {
   }
 });
 
+
+/* ── Playlist ── */
+const _playlistList  = document.getElementById('playlist-list');
+const _playlistPanel = document.getElementById('playlist-panel');
+
+function renderPlaylist() {
+  if (!_playlistList) return;
+  _playlistList.innerHTML = '';
+  playlist.forEach((item, i) => {
+    const li = document.createElement('li');
+    li.className = 'pl-item' + (i === currentIndex ? ' current' : '');
+    li.innerHTML =
+      '<span class="pl-idx">' + (i+1) + '</span>' +
+      '<span class="pl-name">' + item.name + '</span>' +
+      '<span class="pl-del">✕</span>';
+    li.querySelector('.pl-del').addEventListener('click', ev => {
+      ev.stopPropagation();
+      playlist.splice(i, 1);
+      if (currentIndex >= playlist.length) currentIndex = playlist.length - 1;
+      renderPlaylist();
+    });
+    li.addEventListener('click', ev => {
+      ev.stopPropagation();
+      currentIndex = i;
+      skipThumbOnLoad = false;
+      loadVideoFile(playlist[i].file);
+      renderPlaylist();
+    });
+    _playlistList.appendChild(li);
+  });
+  if (_playlistPanel) _playlistPanel.style.display = playlist.length > 1 ? 'block' : 'none';
+}
 
 /* ── Auto-next toggle ── */
 (function() {
