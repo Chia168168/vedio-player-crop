@@ -74,10 +74,6 @@
   .upload-icon svg { width: 28px; height: 28px; stroke: var(--accent); }
   .upload-text { font-size: 15px; font-weight: 600; }
   .upload-sub { font-size: 12px; color: var(--muted); font-family: 'DM Mono', monospace; }
-  #file-input {
-    position: absolute; inset: 0; width: 100%; height: 100%;
-    opacity: 0; cursor: pointer; z-index: 10; font-size: 16px;
-  }
 
   /* ══ PLAYER SCREEN — true fullscreen ══ */
   #player-screen {
@@ -529,7 +525,6 @@ if ('serviceWorker' in navigator) {
 <div id="upload-screen">
   <div class="logo">Video Frame Player</div>
   <div class="upload-zone">
-    <input type="file" id="file-input" accept="video/*" multiple>
     <div class="upload-icon">
       <svg viewBox="0 0 24 24" fill="none" stroke-width="1.8">
         <path d="M15 10l4.553-2.276A1 1 0 0121 8.723v6.554a1 1 0 01-1.447.894L15 14M3 8a2 2 0 012-2h10a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V8z"/>
@@ -689,7 +684,6 @@ if ('serviceWorker' in navigator) {
 
 <script>
 const video             = document.getElementById('video');
-const fileInput         = document.getElementById('file-input');
 const uploadScreen      = document.getElementById('upload-screen');
 const playerScreen      = document.getElementById('player-screen');
 const playBtn           = document.getElementById('play-btn');
@@ -898,36 +892,45 @@ document.getElementById('mini-save').addEventListener('click', e => {
   }, { passive: true });
 })();
 
-const changeInput = document.createElement('input');
-changeInput.type = 'file';
-changeInput.accept = 'video/*';
-changeInput.multiple = true;
-changeInput.style.display = 'none';
-document.body.appendChild(changeInput);
 
-fileInput.addEventListener('change', e => {
-  const files = Array.from(e.target.files || []);
-  if (!files.length) return;
-  fileInput.value = '';
-  const wasEmpty = playlist.length === 0;
-  for (const f of files) playlist.push({ file: f, name: f.name });
   renderPlaylist();
   if (wasEmpty) { currentIndex = 0; loadVideoFromQueue(0, true); }
 });
-changeInput.addEventListener('change', e => {
-  const files = Array.from(e.target.files || []);
-  if (!files.length) return;
-  changeInput.value = '';
-  const wasEmpty = playlist.length === 0;
-  for (const f of files) playlist.push({ file: f, name: f.name });
   renderPlaylist();
   if (wasEmpty) { currentIndex = 0; loadVideoFromQueue(0, true); }
 });
 document.getElementById('change-video-btn').addEventListener('click', e => {
-  e.stopPropagation(); changeInput.click();
+  e.stopPropagation(); openFilePicker();
 });
 
 
+
+/* ── openFilePicker: dynamic input avoids iOS SW reload bug ── */
+function openFilePicker() {
+  const inp = document.createElement('input');
+  inp.type = 'file';
+  inp.accept = 'video/*';
+  inp.multiple = true;
+  inp.style.cssText = 'position:fixed;top:-9999px;left:-9999px;opacity:0;';
+  document.body.appendChild(inp);
+  inp.addEventListener('change', () => {
+    const files = Array.from(inp.files || []);
+    document.body.removeChild(inp);
+    if (!files.length) return;
+    const wasEmpty = playlist.length === 0;
+    for (const f of files) playlist.push({ file: f, name: f.name });
+    renderPlaylist();
+    if (wasEmpty && currentIndex === -1) { currentIndex = 0; loadVideoFromQueue(0, true); }
+  });
+  // small timeout required on iOS to separate from current event loop
+  setTimeout(() => inp.click(), 10);
+}
+
+/* ── Upload zone tap → picker ── */
+document.querySelector('.upload-zone').addEventListener('click', e => {
+  e.stopPropagation();
+  openFilePicker();
+});
 /* ── Playlist helpers ── */
 function loadVideoFromQueue(index, withThumb) {
   if (index < 0 || index >= playlist.length) return;
