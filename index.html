@@ -621,6 +621,7 @@ if ('serviceWorker' in navigator) {
 <div id="export-overlay">
   <p id="export-status">準備中…</p>
   <div id="export-progress-bar"><div id="export-progress-fill"></div></div>
+  <button id="export-download-btn" style="display:none;background:transparent;border:1.5px solid var(--accent);border-radius:100px;padding:10px 24px;color:var(--accent);font-family:'DM Mono',monospace;font-size:14px;cursor:pointer;margin-top:4px;">下載</button>
   <button id="export-cancel">取消</button>
 </div>
 
@@ -2158,50 +2159,45 @@ document.getElementById('loop-export').addEventListener('click', async e => {
   const ext      = currentFile.name.split('.').pop().toLowerCase();
   const base     = currentFile.name.replace(/\.[^.]+$/, '') || 'clip';
   const mimeType = ext === 'mov' ? 'video/quicktime' : 'video/mp4';
+  const dlBtn    = document.getElementById('export-download-btn');
 
-  /* readChunk helper (same as before) */
-  async function readChunk(start, end) {
-    for (let attempt = 0; attempt < 3; attempt++) {
-      try {
-        const buf = await new Promise((res, rej) => {
-          const r = new FileReader();
-          r.onload = ev => {
-            const ab = ev.target.result;
-            if (!ab || ab.byteLength === 0) rej(new Error('empty'));
-            else res(ab);
-          };
-          r.onerror = () => rej(new Error('fr'));
-          r.readAsArrayBuffer(currentFile.slice(start, end));
-        });
-        return new Uint8Array(buf);
-      } catch(_) {
-        if (attempt === 2) throw new Error('讀取失敗 @ ' + start);
-        await new Promise(r => setTimeout(r, 150 * (attempt + 1)));
+  /* waitForUserDownload: show download button, wait for tap, then trigger download */
+  function waitForUserDownload(blob, filename, label) {
+    return new Promise((resolve, reject) => {
+      dlBtn.textContent = label;
+      dlBtn.style.display = 'block';
+      function onTap() {
+        dlBtn.removeEventListener('click', onTap);
+        dlBtn.style.display = 'none';
+        if (exportCancelled) { reject(new Error('cancelled')); return; }
+        const url = URL.createObjectURL(blob);
+        const a   = document.createElement('a');
+        a.href = url; a.download = filename;
+        document.body.appendChild(a); a.click(); document.body.removeChild(a);
+        setTimeout(() => URL.revokeObjectURL(url), 30000);
+        resolve();
       }
-    }
+      dlBtn.addEventListener('click', onTap);
+    });
   }
 
-  /* downloadParts: assemble parts array into a Blob and trigger download */
-  async function downloadParts(parts, filename) {
+  /* downloadParts: assemble blob and prompt user to tap download */
+  async function downloadParts(parts, filename, label) {
     const blob = new Blob(parts, { type: mimeType });
-    const url  = URL.createObjectURL(blob);
-    const a    = document.createElement('a');
-    a.href = url; a.download = filename;
-    document.body.appendChild(a); a.click(); document.body.removeChild(a);
-    setTimeout(() => URL.revokeObjectURL(url), 30000);
+    await waitForUserDownload(blob, filename, label);
   }
 
-  /* processTrimSegment: trim [segIn, segOut] and download as filename */
-  async function processTrimSegment(segIn, segOut, filename, partLabel, totalParts, baseProgress, progressRange) {
+  /* processTrimSegment */
+  async function processTrimSegment(segIn, segOut, filename, partLabel, baseProgress, progressRange) {
     if (exportCancelled) throw new Error('cancelled');
-    exportStatus.textContent = `${partLabel} 分析中…`;
-    exportProgressF.style.width = (baseProgress) + '%';
+    exportStatus.textContent = `${partLabel}分析中…`;
+    exportProgressF.style.width = baseProgress + '%';
 
     if (['mp4','mov','m4v'].includes(ext)) {
       const result = await trimMp4(currentFile, segIn, segOut, (ratio, msg) => {
         if (exportCancelled) throw new Error('cancelled');
         exportProgressF.style.width = Math.round(baseProgress + progressRange * 0.68 * ratio) + '%';
-        exportStatus.textContent = `${partLabel} ${msg}`;
+        exportStatus.textContent = `${partLabel}${msg}`;
       });
       if (exportCancelled) throw new Error('cancelled');
 
@@ -2210,19 +2206,17 @@ document.getElementById('loop-export').addEventListener('click', async e => {
       let readBytes = 0;
       const totalBytes = orderedSamples.reduce((s, r) => s + r.size, 0);
 
-      // Batch adjacent samples
       const batches = [];
       for (const s of orderedSamples) {
         const last = batches[batches.length - 1];
         if (last && last.srcEnd === s.fileStart) {
           last.srcEnd = s.fileStart + s.size;
-          last.outSize += s.size;
         } else {
-          batches.push({ srcStart: s.fileStart, srcEnd: s.fileStart + s.size, outSize: s.size });
+          batches.push({ srcStart: s.fileStart, srcEnd: s.fileStart + s.size });
         }
       }
 
-      const readBase = baseProgress + Math.round(progressRange * 0.68);
+      const readBase  = baseProgress + Math.round(progressRange * 0.68);
       const readRange = Math.round(progressRange * 0.28);
       for (const batch of batches) {
         if (exportCancelled) throw new Error('cancelled');
@@ -2236,70 +2230,66 @@ document.getElementById('loop-export').addEventListener('click', async e => {
           readBytes += chunkEnd - pos;
           pos = chunkEnd;
           exportProgressF.style.width = Math.round(readBase + readRange * readBytes / totalBytes) + '%';
-          exportStatus.textContent = `${partLabel} 讀取 ${Math.round(100 * readBytes / totalBytes)}%…`;
+          exportStatus.textContent = `${partLabel}讀取 ${Math.round(100 * readBytes / totalBytes)}%…`;
           await new Promise(r => setTimeout(r, 0));
         }
       }
 
       exportProgressF.style.width = Math.round(baseProgress + progressRange * 0.98) + '%';
-      exportStatus.textContent = `${partLabel} 下載中…`;
-      await downloadParts(parts, filename);
+      exportStatus.textContent = `${partLabel}準備下載…`;
+      const dlLabel = partLabel ? `⬇ 下載 ${partLabel}` : '⬇ 下載剪輯';
+      await downloadParts(parts, filename, dlLabel);
 
     } else {
-      // MediaRecorder fallback
-      exportStatus.textContent = `${partLabel} 即時錄製模式…`;
+      exportStatus.textContent = `${partLabel}即時錄製…`;
       exportProgressF.style.width = (baseProgress + 5) + '%';
       const { blob, ext: outExt } = await trimByMediaRecorder(segIn, segOut, (ratio, msg) => {
         exportProgressF.style.width = Math.round(baseProgress + progressRange * ratio) + '%';
-        exportStatus.textContent = `${partLabel} ${msg}`;
+        exportStatus.textContent = `${partLabel}${msg}`;
       });
       if (exportCancelled) throw new Error('cancelled');
-      const url = URL.createObjectURL(blob);
-      const a   = document.createElement('a');
-      a.href = url; a.download = filename;
-      document.body.appendChild(a); a.click(); document.body.removeChild(a);
-      setTimeout(() => URL.revokeObjectURL(url), 30000);
+      const dlLabel = partLabel ? `⬇ 下載 ${partLabel}` : '⬇ 下載剪輯';
+      const blobObj = blob;
+      await waitForUserDownload(blobObj, `${base}_clip${partLabel ? '_'+partLabel.replace(/[()\/]/g,'') : ''}.${outExt}`, dlLabel);
     }
   }
 
   try {
-    const clipDuration = loopOut - loopIn;
-    const LIMIT = 300 * 1024 * 1024; // 300 MB
-
-    // Estimate output size by bitrate (file size / total duration)
+    const clipDuration  = loopOut - loopIn;
+    const LIMIT         = 300 * 1024 * 1024;
     const estimatedSize = (clipDuration / duration) * currentFile.size;
 
     if (estimatedSize > LIMIT) {
-      // Calculate how many parts needed
       const nParts = Math.ceil(estimatedSize / LIMIT);
-      const segDur  = clipDuration / nParts;
-      showToast(`預估 ${(estimatedSize/1024/1024).toFixed(0)}MB，將分割為 ${nParts} 個檔案`);
-      await new Promise(r => setTimeout(r, 800)); // let toast show
+      const segDur = clipDuration / nParts;
+      showToast(`預估 ${(estimatedSize/1024/1024).toFixed(0)}MB，分割為 ${nParts} 個檔案`);
+      await new Promise(r => setTimeout(r, 800));
 
       for (let i = 0; i < nParts; i++) {
-        if (exportCancelled) { exportOverlay.classList.remove('show'); return; }
-        const segIn  = loopIn  + i * segDur;
+        if (exportCancelled) { exportOverlay.classList.remove('show'); dlBtn.style.display='none'; return; }
+        const segIn  = loopIn + i * segDur;
         const segOut = Math.min(loopIn + (i + 1) * segDur, loopOut);
-        const suffix = String(i + 1).padStart(2, '0');
+        const suffix  = String(i + 1).padStart(2, '0');
         const filename = `${base}_clip_part${suffix}.${ext}`;
-        const partLabel = `(${i+1}/${nParts})`;
-        const baseProgress = Math.round(100 * i / nParts);
+        const partLabel = `(${i+1}/${nParts}) `;
+        const baseProgress  = Math.round(100 * i / nParts);
         const progressRange = Math.round(100 / nParts);
-        await processTrimSegment(segIn, segOut, filename, partLabel, nParts, baseProgress, progressRange);
+        await processTrimSegment(segIn, segOut, filename, partLabel, baseProgress, progressRange);
       }
     } else {
-      // Single file (original flow)
       const ss = loopIn.toFixed(3);
       const filename = `${base}_clip_${ss.replace('.','_')}.${ext}`;
-      await processTrimSegment(loopIn, loopOut, filename, '', 1, 0, 100);
+      await processTrimSegment(loopIn, loopOut, filename, '', 0, 100);
     }
 
+    dlBtn.style.display = 'none';
     exportProgressF.style.width = '100%';
     exportStatus.textContent = '完成！';
     setTimeout(() => exportOverlay.classList.remove('show'), 1400);
     showToast('剪輯完成');
 
   } catch(err) {
+    dlBtn.style.display = 'none';
     exportOverlay.classList.remove('show');
     if (err.message !== 'cancelled') showToast('剪輯失敗：' + (err.message || err));
   }
