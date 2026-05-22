@@ -340,63 +340,26 @@
     display: flex; align-items: center; gap: 8px;
     padding: 4px 12px 8px;
   }
-  #loop-toggle {
-    background: transparent; border: 1.5px solid rgba(255,255,255,0.2);
-    border-radius: 100px; padding: 5px 12px;
-    color: rgba(255,255,255,0.5); font-family: 'DM Mono', monospace;
-    font-size: 12px; cursor: pointer; white-space: nowrap; flex-shrink: 0;
-    transition: all 0.15s;
-  }
-  #loop-toggle.active {
-    border-color: var(--accent2); color: var(--accent2);
-  }
-  #loop-set-in, #loop-set-out {
+  /* ── Loop-row unified button style ── */
+  #loop-set-in, #loop-set-out, #loop-clear, #loop-toggle,
+  #auto-next-toggle, #loop-export, #loop-convert, #export-format {
     background: transparent; border: 1.5px solid rgba(255,255,255,0.2);
     border-radius: 100px; padding: 5px 10px;
-    color: rgba(255,255,255,0.5); font-family: 'DM Mono', monospace;
+    color: rgba(255,255,255,0.45); font-family: 'DM Mono', monospace;
     font-size: 12px; cursor: pointer; white-space: nowrap; flex-shrink: 0;
-    transition: all 0.15s;
+    transition: all 0.15s; -webkit-appearance: none; appearance: none;
   }
-  #loop-set-in.set { border-color: rgba(200,255,71,0.5); color: var(--accent); }
-  #loop-set-out.set { border-color: rgba(200,255,71,0.5); color: var(--accent); }
-  #loop-set-in:active, #loop-set-out:active, #loop-toggle:active, #loop-clear:active { opacity: 0.6; }
-
-  #loop-clear {
-    background: transparent; border: 1.5px solid rgba(255,255,255,0.2);
-    border-radius: 100px; padding: 5px 10px;
-    color: rgba(255,255,255,0.4); font-family: 'DM Mono', monospace;
-    font-size: 12px; cursor: pointer; white-space: nowrap; flex-shrink: 0;
-    transition: all 0.15s;
-  }
-
-  #loop-export {
-    background: transparent; border: 1.5px solid rgba(200,255,71,0.3);
-    border-radius: 100px; padding: 5px 11px;
-    color: var(--accent); font-family: 'DM Mono', monospace;
-    font-size: 12px; cursor: pointer; white-space: nowrap; flex-shrink: 0;
-    transition: all 0.15s;
-  }
-  #loop-export:active { opacity: 0.6; }
+  #loop-set-in:active, #loop-set-out:active, #loop-clear:active,
+  #loop-toggle:active, #auto-next-toggle:active,
+  #loop-export:active, #loop-convert:active { opacity: 0.6; }
   #loop-export:disabled { opacity: 0.3; cursor: not-allowed; }
-
-  #loop-convert {
-    background: transparent; border: 1.5px solid rgba(71,212,255,0.3);
-    border-radius: 100px; padding: 5px 11px;
-    color: var(--accent2); font-family: 'DM Mono', monospace;
-    font-size: 12px; cursor: pointer; white-space: nowrap; flex-shrink: 0;
-    transition: all 0.15s;
-  }
-  #loop-convert:active { opacity: 0.6; }
-
-  #export-format {
-    background: transparent; border: 1.5px solid rgba(255,255,255,0.2);
-    border-radius: 100px; padding: 5px 8px;
-    color: rgba(255,255,255,0.6); font-family: 'DM Mono', monospace;
-    font-size: 12px; cursor: pointer; flex-shrink: 0;
-    -webkit-appearance: none; appearance: none;
-    text-align: center;
-  }
   #export-format option { background: #1a1a1a; color: #fff; }
+  /* activated states */
+  #loop-set-in.set  { border-color: rgba(200,255,71,0.5); color: var(--accent); }
+  #loop-set-out.set { border-color: rgba(200,255,71,0.5); color: var(--accent); }
+  #loop-toggle.active      { border-color: var(--accent2); color: var(--accent2); }
+  #auto-next-toggle.active { border-color: var(--accent2); color: var(--accent2); }
+  #loop-export.active, #loop-convert.active { opacity: 0.6; }
 
   /* Export progress overlay */
   #export-overlay {
@@ -430,7 +393,7 @@
 
   #loop-range-display {
     flex: 1; font-family: 'DM Mono', monospace; font-size: 10px;
-    color: rgba(255,255,255,0.85); text-align: left; white-space: nowrap;
+    color: rgba(255,255,255,0.35); text-align: left; white-space: nowrap;
     overflow: hidden; text-overflow: ellipsis;
   }
 
@@ -504,7 +467,7 @@ if ('serviceWorker' in navigator) {
 
 <!-- Upload -->
 <div id="upload-screen">
-  <div class="logo">TENG 影片播放器</div>
+  <div class="logo">Video Frame Player</div>
   <div class="upload-zone">
     <input type="file" id="file-input" accept="video/*">
     <div class="upload-icon">
@@ -637,10 +600,10 @@ if ('serviceWorker' in navigator) {
       <button id="loop-set-in">IN</button>
       <button id="loop-set-out">OUT</button>
       <button id="loop-clear">✕</button>
-      <button id="loop-toggle">⟲</button>      
-      <button id="auto-next-toggle" class="loop-convert">連播</button>
-      <button id="loop-export">剪輯</button>
-      <button id="loop-convert">轉換</button>      
+      <button id="loop-toggle">⟲</button>
+      <button id="auto-next-toggle">連播</button>
+      <button id="loop-export">✂</button>
+      <button id="loop-convert">⇄</button>
       <select id="export-format">
         <option value="original">原格式</option>
         <option value="mp4">MP4</option>
@@ -1411,7 +1374,7 @@ function updateLoopOverlay() {
     loopRangeOverlay.style.left  = l + '%';
     loopRangeOverlay.style.width = w + '%';
     loopRangeOverlay.classList.add('show');
-    loopRangeDisplay.textContent = `${formatTime(loopIn)} → ${formatTime(loopOut)} = ${formatTime(loopOut - loopIn)}`;
+    loopRangeDisplay.textContent = `${formatTime(loopIn)} → ${formatTime(loopOut)}`;
   } else {
     loopRangeOverlay.classList.remove('show');
     loopRangeDisplay.textContent = '—';
