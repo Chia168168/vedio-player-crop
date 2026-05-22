@@ -97,7 +97,7 @@
     width: 100%; height: 100%;
     display: block; object-fit: contain;
     transform-origin: center center;
-    transition: opacity 0.2s ease;
+    transition: none;
     will-change: transform;
   }
 
@@ -453,8 +453,9 @@
 .pl-idx { width:16px; text-align:right; opacity:0.4; flex-shrink:0; }
 .pl-name { flex:1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .pl-del { flex-shrink:0; font-size:12px; opacity:0.3; padding:0 4px; color:#fff; }
-</styconsole.log('[DEBUG] Script loaded');
+</style>
 
+<script>console.log('[INIT] loaded');
 
 /* Register Service Worker for COI headers (SharedArrayBuffer support) */
 if ('serviceWorker' in navigator) {
@@ -629,9 +630,6 @@ if ('serviceWorker' in navigator) {
 
 <script>
 const video             = document.getElementById('video');
-console.log('[DEBUG] video element:', video);
-video.style.opacity = '1';
-console.log('[DEBUG] opacity set to 1');
 const fileInput         = document.getElementById('file-input');
 const uploadScreen      = document.getElementById('upload-screen');
 const playerScreen      = document.getElementById('player-screen');
@@ -1298,14 +1296,8 @@ video.addEventListener('ended', () => {
       resetLoop();
       uploadScreen.style.display = 'none';
       playerScreen.style.display = 'block';
-      console.log('[DEBUG] Switching video, fade out');
-      video.pause();
-      isPlaying = false;
-      video.style.opacity = '0';
-      requestAnimationFrame(() => {
-        video.src = currentBlobUrl;
-        if (video.readyState === 0) video.load();
-      });
+      video.src = currentBlobUrl;
+      setTimeout(() => { if (video.readyState === 0) video.load(); }, 50);
       video.addEventListener('loadedmetadata', function lm() {
         video.removeEventListener('loadedmetadata', lm);
         duration = video.duration;
@@ -1317,8 +1309,6 @@ video.addEventListener('ended', () => {
       }, { once: true });
       video.addEventListener('canplay', function ap() {
         video.removeEventListener('canplay', ap);
-        console.log('[DEBUG] canplay, fade in');
-        video.style.opacity = '1';
         video.play(); isPlaying = true; setPlayIcon(true);
       });
     } else {
@@ -2524,7 +2514,7 @@ function renderPlaylist() {
   });
   if (_plPanel) _plPanel.style.display = playlist.length > 1 ? 'block' : 'none';
 }
- : 'none';
+lock' : 'none';
 }
 </script>
 </body>
