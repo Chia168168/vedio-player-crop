@@ -124,7 +124,7 @@
     transition: opacity 0.3s;
   }
   #time-display { color: rgba(255,255,255,0.85); }
-  #frame-display { color: rgba(255,255,255,0.85); font-size: 10px; }
+  #frame-display { color: rgba(255,255,255,0.5); font-size: 10px; }
   #time-overlay.hidden { opacity: 0; }
 
   /* ── Mini bar (visible when panel hidden) ── */
@@ -294,7 +294,7 @@
   }
   .timeline-label {
     font-size: 10px; font-family: 'DM Mono', monospace;
-    color: rgba(255,255,255,1); letter-spacing: 0.15em; text-transform: uppercase;
+    color: var(--muted); letter-spacing: 0.15em; text-transform: uppercase;
     display: flex; justify-content: space-between;
   }
   #progress-bar-wrap {
@@ -345,7 +345,7 @@
   #auto-next-toggle, #loop-export, #loop-convert, #export-format {
     background: transparent; border: 1.5px solid rgba(255,255,255,0.2);
     border-radius: 100px; padding: 5px 10px;
-    color: rgba(255,255,255,0.85); font-family: 'DM Mono', monospace;
+    color: rgba(255,255,255,0.45); font-family: 'DM Mono', monospace;
     font-size: 12px; cursor: pointer; white-space: nowrap; flex-shrink: 0;
     transition: all 0.15s; -webkit-appearance: none; appearance: none;
   }
@@ -393,7 +393,7 @@
 
   #loop-range-display {
     flex: 1; font-family: 'DM Mono', monospace; font-size: 10px;
-    color: rgba(255,255,255,0.85); text-align: left; white-space: nowrap;
+    color: rgba(255,255,255,0.35); text-align: left; white-space: nowrap;
     overflow: hidden; text-overflow: ellipsis;
   }
 
@@ -467,7 +467,7 @@ if ('serviceWorker' in navigator) {
 
 <!-- Upload -->
 <div id="upload-screen">
-  <div class="logo">TENG 影片播放器</div>
+  <div class="logo">Video Frame Player</div>
   <div class="upload-zone">
     <input type="file" id="file-input" accept="video/*">
     <div class="upload-icon">
@@ -483,7 +483,7 @@ if ('serviceWorker' in navigator) {
 <!-- Player -->
 <div id="player-screen">
   <div id="video-container">
-    <video id="video" playsinline webkit-playsinline></video>
+    <video id="video" playsinline webkit-playsinline preload="metadata"></video>
   </div>
 
   <div id="tap-overlay"></div>
@@ -660,6 +660,8 @@ let currentSpeed = 1;
 let frameMode = false;
 let frameInterval = null;
 let currentBlobUrl = null;
+let nextBlobUrl = null;
+let nextPreloadVideo = null;
 let panelVisible = true;
 let autoHideTimer = null;
 
@@ -738,6 +740,7 @@ document.getElementById('mini-save').addEventListener('click', e => {
   const vid = document.getElementById('video');
 
   let scale = 1, posX = 0, posY = 0;
+  let zoomNeedsReset = false;
   let startScale = 1, startPosX = 0, startPosY = 0;
   let panStartX = 0, panStartY = 0;
   let lastTapTime = 0;
@@ -766,6 +769,7 @@ document.getElementById('mini-save').addEventListener('click', e => {
   }
 
   tapOverlay.addEventListener('touchstart', e => {
+    if (zoomNeedsReset) { zoomNeedsReset = false; scale = 1; posX = 0; posY = 0; applyTransform(false); }
     if (e.touches.length === 2) {
       e.preventDefault();
       didMove = true;
@@ -861,7 +865,32 @@ document.getElementById('change-video-btn').addEventListener('click', e => {
   e.stopPropagation(); changeInput.click();
 });
 
+
+/* ── Background preload next video ── */
+function preloadNext() {
+  // revoke old preload if exists
+  if (nextBlobUrl) { URL.revokeObjectURL(nextBlobUrl); nextBlobUrl = null; }
+  if (nextPreloadVideo) { nextPreloadVideo.src = ''; nextPreloadVideo = null; }
+  if (!autoPlayNext) return;
+  const nextIdx = currentIndex + 1;
+  if (nextIdx < 0 || nextIdx >= playlist.length) return;
+  try {
+    nextBlobUrl = URL.createObjectURL(playlist[nextIdx].file);
+    // create hidden video element to trigger iOS buffer
+    nextPreloadVideo = document.createElement('video');
+    nextPreloadVideo.preload = 'auto';
+    nextPreloadVideo.muted = true;
+    nextPreloadVideo.style.display = 'none';
+    nextPreloadVideo.src = nextBlobUrl;
+    nextPreloadVideo.load();
+  } catch(e) {
+    nextBlobUrl = null;
+    nextPreloadVideo = null;
+  }
+}
+
 function loadVideoFile(file) {
+  zoomNeedsReset = true;
   stopFrameMode();
   video.pause();
   isPlaying = false; setPlayIcon(false);
@@ -922,9 +951,12 @@ function loadVideoFile(file) {
   // Clear stall timer once loaded
   video.addEventListener('loadedmetadata', () => clearTimeout(stallTimer), { once: true });
 
-  // Set src once, then load once
+  // Set src - browser will auto-load (force load if needed on iOS)
   video.src = currentBlobUrl;
-  video.load();
+  // Safari sometimes needs explicit load() after src change
+  setTimeout(() => { if (video.readyState === 0) video.load(); }, 50);
+  // start preloading next video in background
+  setTimeout(preloadNext, 500);
 }
 
 function onMetaLoaded() {
@@ -1249,12 +1281,44 @@ video.addEventListener('ended', () => {
     currentIndex++;
     skipThumbOnLoad = true;
     skipFpsAndThumb = true;
-    loadVideoFile(playlist[currentIndex].file);
-    renderPlaylist();
-    video.addEventListener('canplay', function ap() {
-      video.removeEventListener('canplay', ap);
-      video.play(); isPlaying = true; setPlayIcon(true);
-    });
+    zoomNeedsReset = true;
+    // inject preloaded blob url if available
+    if (nextBlobUrl) {
+      if (currentBlobUrl) URL.revokeObjectURL(currentBlobUrl);
+      currentBlobUrl = nextBlobUrl;
+      nextBlobUrl = null;
+      if (nextPreloadVideo) { nextPreloadVideo.src = ''; nextPreloadVideo = null; }
+      currentFile = playlist[currentIndex].file;
+      // reset speed/loop UI
+      document.querySelectorAll('.speed-btn').forEach(b => b.classList.remove('active'));
+      document.querySelector('.speed-btn[data-speed="1"]').classList.add('active');
+      currentSpeed = 1; video.playbackRate = 1;
+      resetLoop();
+      uploadScreen.style.display = 'none';
+      playerScreen.style.display = 'block';
+      video.src = currentBlobUrl;
+      setTimeout(() => { if (video.readyState === 0) video.load(); }, 50);
+      video.addEventListener('loadedmetadata', function lm() {
+        video.removeEventListener('loadedmetadata', lm);
+        duration = video.duration;
+        totalTimeLabel.textContent = formatTime(duration);
+        thumbStatus.style.display = 'none';
+        updateUI();
+        renderPlaylist();
+        setTimeout(preloadNext, 500);
+      }, { once: true });
+      video.addEventListener('canplay', function ap() {
+        video.removeEventListener('canplay', ap);
+        video.play(); isPlaying = true; setPlayIcon(true);
+      });
+    } else {
+      loadVideoFile(playlist[currentIndex].file);
+      renderPlaylist();
+      video.addEventListener('canplay', function ap() {
+        video.removeEventListener('canplay', ap);
+        video.play(); isPlaying = true; setPlayIcon(true);
+      });
+    }
     return;
   }
   isPlaying = false; setPlayIcon(false);
@@ -1374,7 +1438,7 @@ function updateLoopOverlay() {
     loopRangeOverlay.style.left  = l + '%';
     loopRangeOverlay.style.width = w + '%';
     loopRangeOverlay.classList.add('show');
-    loopRangeDisplay.textContent = `${formatTime(loopIn)} → ${formatTime(loopOut)} = ${formatTime(loopOut - loopIn)}`;
+    loopRangeDisplay.textContent = `${formatTime(loopIn)} → ${formatTime(loopOut)}`;
   } else {
     loopRangeOverlay.classList.remove('show');
     loopRangeDisplay.textContent = '—';
@@ -2404,6 +2468,9 @@ function renderPlaylist() {
       ev.stopPropagation();
       currentIndex = i;
       skipThumbOnLoad = false;
+      // clear old preload; new one will be created after load
+      if (nextBlobUrl) { URL.revokeObjectURL(nextBlobUrl); nextBlobUrl = null; }
+      if (nextPreloadVideo) { nextPreloadVideo.src = ''; nextPreloadVideo = null; }
       loadVideoFile(playlist[i].file);
       renderPlaylist();
     });
@@ -2422,6 +2489,12 @@ function renderPlaylist() {
     autoPlayNext = !autoPlayNext;
     btn.classList.toggle('active', autoPlayNext);
     showToast(autoPlayNext ? '已開啟連續播放' : '已關閉連續播放');
+    if (!autoPlayNext) {
+      if (nextBlobUrl) { URL.revokeObjectURL(nextBlobUrl); nextBlobUrl = null; }
+      if (nextPreloadVideo) { nextPreloadVideo.src = ''; nextPreloadVideo = null; }
+    } else {
+      setTimeout(preloadNext, 300);
+    }
     resetAutoHide();
   });
 })();
