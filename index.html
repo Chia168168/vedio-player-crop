@@ -689,6 +689,7 @@ const timeOverlay       = document.getElementById('time-overlay');
 
 
 let playlist=[]; let currentIndex=-1; let autoPlayNext=true; let skipThumbOnLoad=false;
+let skipFpsAndThumb=false;
 let fps = 30;       // will be updated after detection
 let fpsDetected = false;
 let duration = 0;
@@ -910,10 +911,12 @@ function loadVideoFile(file) {
   document.querySelectorAll('.speed-btn').forEach(b => b.classList.remove('active'));
   document.querySelector('.speed-btn[data-speed="1"]').classList.add('active');
   currentSpeed = 1; video.playbackRate = 1;
-  fps = 30; fpsDetected = false;
-  document.querySelectorAll('.fps-btn').forEach(b => {
-    b.classList.toggle('active', b.dataset.fps === '30');
-  });
+  if (!skipFpsAndThumb) {
+    fps = 30; fpsDetected = false;
+    document.querySelectorAll('.fps-btn').forEach(b => {
+      b.classList.toggle('active', b.dataset.fps === '30');
+    });
+  }
   resetLoop();
 
   if (currentBlobUrl) { URL.revokeObjectURL(currentBlobUrl); currentBlobUrl = null; }
@@ -976,6 +979,12 @@ function onMetaLoaded() {
   thumbStatus.style.display = 'block';
   updateUI();
   updateLoopOverlay();
+  if (skipFpsAndThumb) {
+    skipFpsAndThumb = false;
+    thumbStatus.style.display = 'none';
+    updateUI();
+    return;
+  }
   detectFPS().then(() => {
     updateUI();
     if (skipThumbOnLoad) { skipThumbOnLoad = false; thumbStatus.style.display = 'none'; }
@@ -1277,6 +1286,7 @@ video.addEventListener('ended', () => {
   if (autoPlayNext && currentIndex >= 0 && currentIndex + 1 < playlist.length) {
     currentIndex++;
     skipThumbOnLoad = true;
+    skipFpsAndThumb = true;
     loadVideoFile(playlist[currentIndex].file);
     renderPlaylist();
     video.addEventListener('canplay', function ap() {
