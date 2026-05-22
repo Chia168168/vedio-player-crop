@@ -930,7 +930,7 @@ function loadVideoFile(file) {
 }
 
 function onMetaLoaded() {
-  alert('onMetaLoaded');
+  alert('onMetaLoaded dur=' + video.duration + ' w=' + video.videoWidth + ' h=' + video.videoHeight);
   if (!video.duration || isNaN(video.duration)) {
     showToast('無法讀取影片資訊');
     thumbStatus.textContent = '載入失敗';
