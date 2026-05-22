@@ -345,7 +345,7 @@
   #auto-next-toggle, #loop-export, #loop-convert, #export-format {
     background: transparent; border: 1.5px solid rgba(255,255,255,0.2);
     border-radius: 100px; padding: 5px 10px;
-    color: rgba(255,255,255,0.45); font-family: 'DM Mono', monospace;
+    color: rgba(255,255,255,0.85); font-family: 'DM Mono', monospace;
     font-size: 12px; cursor: pointer; white-space: nowrap; flex-shrink: 0;
     transition: all 0.15s; -webkit-appearance: none; appearance: none;
   }
@@ -467,7 +467,7 @@ if ('serviceWorker' in navigator) {
 
 <!-- Upload -->
 <div id="upload-screen">
-  <div class="logo">Video Frame Player</div>
+  <div class="logo">TENG 影片播放器</div>
   <div class="upload-zone">
     <input type="file" id="file-input" accept="video/*">
     <div class="upload-icon">
@@ -1374,7 +1374,7 @@ function updateLoopOverlay() {
     loopRangeOverlay.style.left  = l + '%';
     loopRangeOverlay.style.width = w + '%';
     loopRangeOverlay.classList.add('show');
-    loopRangeDisplay.textContent = `${formatTime(loopIn)} → ${formatTime(loopOut)}`;
+    loopRangeDisplay.textContent = `${formatTime(loopIn)} → ${formatTime(loopOut)} = ${formatTime(loopOut - loopIn)}`;
   } else {
     loopRangeOverlay.classList.remove('show');
     loopRangeDisplay.textContent = '—';
