@@ -1411,7 +1411,7 @@ function updateLoopOverlay() {
     loopRangeOverlay.style.left  = l + '%';
     loopRangeOverlay.style.width = w + '%';
     loopRangeOverlay.classList.add('show');
-    loopRangeDisplay.textContent = `${formatTime(loopIn)} → ${formatTime(loopOut)}`;
+    loopRangeDisplay.textContent = `${formatTime(loopIn)} → ${formatTime(loopOut)} = ${formatTime(loopOut - loopIn)}`;
   } else {
     loopRangeOverlay.classList.remove('show');
     loopRangeDisplay.textContent = '—';
