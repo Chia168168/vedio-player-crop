@@ -846,6 +846,7 @@ document.body.appendChild(changeInput);
 
 fileInput.addEventListener('change', e => {
   const f = e.target.files && e.target.files[0];
+  console.log('[DEBUG] file change', !!f, f && f.name, f && f.size);
   if (!f) return;
   fileInput.value = '';
   playlist.push({ file: f, name: f.name });
@@ -891,52 +892,21 @@ function preloadNext() {
 }
 
 function loadVideoFile(file) {
-  zoomNeedsReset = true;
-  stopFrameMode();
-  video.pause();
-  isPlaying = false; setPlayIcon(false);
-  duration = 0;
-  thumbCanvasStrip.innerHTML = '';
-  thumbStatus.textContent = '載入中…';
-  thumbStatus.style.display = 'block';
-
-  document.querySelectorAll('.speed-btn').forEach(b => b.classList.remove('active'));
-  document.querySelector('.speed-btn[data-speed="1"]').classList.add('active');
-  currentSpeed = 1; video.playbackRate = 1;
-  if (!skipFpsAndThumb) {
-    fps = 30; fpsDetected = false;
-    document.querySelectorAll('.fps-btn').forEach(b => {
-      b.classList.toggle('active', b.dataset.fps === '30');
-    });
-  }
-  resetLoop();
-
-  if (currentBlobUrl) { URL.revokeObjectURL(currentBlobUrl); currentBlobUrl = null; }
-  currentFile = file;
-
+  console.log('[DEBUG] loadVideoFile enter', file && file.name, file && file.size);
   try {
+    if (currentBlobUrl) { URL.revokeObjectURL(currentBlobUrl); currentBlobUrl = null; }
+    currentFile = file;
     currentBlobUrl = URL.createObjectURL(file);
   } catch(e) {
-    showToast('無法開啟檔案'); return;
+    console.log('[DEBUG] createObjectURL failed', e);
+    showToast('無法開啟檔案');
+    return;
   }
-
   uploadScreen.style.display = 'none';
   playerScreen.style.display = 'block';
-  showPanel();
-  requestWakeLock();
-
-  // Direct load path: set src and wait for canplay
   video.src = currentBlobUrl;
-  video.addEventListener('canplay', function onCanPlay() {
-    video.removeEventListener('canplay', onCanPlay);
-    onMetaLoaded();
-  }, { once: true });
-
-  // Fallback: if canplay doesn't arrive, still try after a short delay
-  setTimeout(() => {
-    if (video.readyState >= 3) onMetaLoaded();
-  }, 800);
-  // start preloading next video in background
+  video.load();
+  console.log('[DEBUG] src set', currentBlobUrl);
 }
 
 function onMetaLoaded() {
