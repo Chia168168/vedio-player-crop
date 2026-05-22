@@ -951,9 +951,8 @@ function loadVideoFile(file) {
   // Clear stall timer once loaded
   video.addEventListener('loadedmetadata', () => clearTimeout(stallTimer), { once: true });
 
-  // Set src once, then load once
+  // Set src - browser will auto-load with preload=metadata
   video.src = currentBlobUrl;
-  video.load();
   // start preloading next video in background
   setTimeout(preloadNext, 500);
 }
@@ -1296,7 +1295,6 @@ video.addEventListener('ended', () => {
       uploadScreen.style.display = 'none';
       playerScreen.style.display = 'block';
       video.src = currentBlobUrl;
-      video.load();
       video.addEventListener('loadedmetadata', function lm() {
         video.removeEventListener('loadedmetadata', lm);
         duration = video.duration;
@@ -2512,6 +2510,8 @@ function renderPlaylist() {
     _plList.appendChild(li);
   });
   if (_plPanel) _plPanel.style.display = playlist.length > 1 ? 'block' : 'none';
+}
+block' : 'none';
 }
 </script>
 </body>
