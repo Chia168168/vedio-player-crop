@@ -1694,24 +1694,35 @@ async function trimMp4(file, startSec, endSec, onProgress) {
   async function readSlice(s, e) {
     const size = e - s;
     if (size <= 0) return new ArrayBuffer(0);
+    // retry wrapper — iOS FileReader can transiently fail even on tiny reads
+    async function readOnceSlice(from, to) {
+      for (let attempt = 0; attempt < 4; attempt++) {
+        try {
+          const buf = await new Promise((res, rej) => {
+            const r = new FileReader();
+            r.onload = ev => {
+              const ab = ev.target.result;
+              if (!ab || ab.byteLength === 0) rej(new Error('empty'));
+              else res(ab);
+            };
+            r.onerror = () => rej(new Error('FileReader error @ ' + from + '-' + to));
+            r.readAsArrayBuffer(file.slice(from, to));
+          });
+          return buf;
+        } catch(err) {
+          if (attempt === 3) throw err;
+          await new Promise(r => setTimeout(r, 200 * (attempt + 1)));
+        }
+      }
+    }
     if (size <= FR_CHUNK) {
-      return new Promise((res, rej) => {
-        const r = new FileReader();
-        r.onload = ev => res(ev.target.result);
-        r.onerror = ev => rej(new Error('FileReader error @ ' + s + '-' + e));
-        r.readAsArrayBuffer(file.slice(s, e));
-      });
+      return readOnceSlice(s, e);
     }
     // large slice: read in FR_CHUNK pieces and concat
     const parts = [];
     for (let pos = s; pos < e; pos += FR_CHUNK) {
       if (exportCancelled) throw new Error('cancelled');
-      const part = await new Promise((res, rej) => {
-        const r = new FileReader();
-        r.onload = ev => res(ev.target.result);
-        r.onerror = ev => rej(new Error('FileReader error @ ' + pos));
-        r.readAsArrayBuffer(file.slice(pos, Math.min(pos + FR_CHUNK, e)));
-      });
+      const part = await readOnceSlice(pos, Math.min(pos + FR_CHUNK, e));
       parts.push(new Uint8Array(part));
     }
     const total = parts.reduce((s, a) => s + a.byteLength, 0);
@@ -2342,6 +2353,8 @@ document.getElementById('loop-export').addEventListener('click', async e => {
         const baseProgress  = Math.round(100 * i / nParts);
         const progressRange = Math.round(100 / nParts);
         await processTrimSegment(segIn, segOut, filename, partLabel, baseProgress, progressRange);
+        // give iOS time to release memory between segments
+        await new Promise(r => setTimeout(r, 600));
       }
     } else {
       const ss = loopIn.toFixed(3);
