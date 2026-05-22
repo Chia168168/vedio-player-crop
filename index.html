@@ -481,6 +481,15 @@
   .pl-idx { width: 16px; text-align: right; opacity: 0.4; flex-shrink: 0; }
   .pl-name { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .pl-del { flex-shrink: 0; font-size: 12px; opacity: 0.3; padding: 0 2px; color: #fff; }
+
+#playlist-panel { max-height:120px; overflow-y:auto; -webkit-overflow-scrolling:touch; padding:2px 12px 8px; border-top:1px solid rgba(255,255,255,0.08); position:relative; z-index:35; }
+.pl-header { font-family:'DM Mono',monospace; font-size:10px; text-transform:uppercase; letter-spacing:0.18em; color:rgba(255,255,255,0.3); padding:4px 0 2px; }
+#playlist-list { list-style:none; margin:0; padding:0; }
+#playlist-list .pl-item { display:flex; align-items:center; gap:6px; padding:5px 0; cursor:pointer; font-family:'DM Mono',monospace; font-size:11px; color:rgba(255,255,255,0.65); }
+#playlist-list .pl-item.current { color:var(--accent2); }
+.pl-idx { width:16px; text-align:right; opacity:0.4; flex-shrink:0; }
+.pl-name { flex:1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.pl-del { flex-shrink:0; font-size:12px; opacity:0.3; padding:0 4px; color:#fff; }
 </style>
 
 <script>
@@ -629,6 +638,7 @@ if ('serviceWorker' in navigator) {
       <button id="loop-set-out">OUT</button>
       <button id="loop-clear">✕</button>
       <button id="auto-next-toggle" class="loop-toggle">連播</button>
+      <button id="auto-next-toggle" class="loop-toggle">連播</button>
       <button id="loop-toggle">⟲</button>
       <select id="export-format">
         <option value="original">原格式</option>
@@ -638,6 +648,10 @@ if ('serviceWorker' in navigator) {
       <button id="loop-export">✂</button>
       <button id="loop-convert">⇄</button>
     </div>
+<div id="playlist-panel" style="display:none;">
+  <div class="pl-header">播放佇列</div>
+  <ul id="playlist-list"></ul>
+</div>
   </div>
 </div>
 
@@ -673,7 +687,8 @@ const miniBar           = document.getElementById('mini-bar');
 const miniPlayIcon      = document.getElementById('mini-play-icon');
 const timeOverlay       = document.getElementById('time-overlay');
 
-let playlist = []; let currentIndex = -1; let autoPlayNext = true; let skipThumbOnLoad = false;
+
+let playlist=[]; let currentIndex=-1; let autoPlayNext=true; let skipThumbOnLoad=false;
 let fps = 30;       // will be updated after detection
 let fpsDetected = false;
 let duration = 0;
@@ -866,29 +881,19 @@ fileInput.addEventListener('change', e => {
   if (!f) return;
   fileInput.value = '';
   playlist.push({ file: f, name: f.name });
-  if (currentIndex === -1) {
-    currentIndex = 0;
-    loadVideoFile(f);
-    renderPlaylist();
-  } else {
-    renderPlaylist();
-    showToast('已加入佇列 (' + playlist.length + ')');
-  }
+  if (currentIndex === -1) { currentIndex = 0; loadVideoFile(f); }
+  else { renderPlaylist(); showToast('已加入佇列 (' + playlist.length + ')'); }
 });
+
 changeInput.addEventListener('change', e => {
   const f = e.target.files && e.target.files[0];
   if (!f) return;
   changeInput.value = '';
   playlist.push({ file: f, name: f.name });
-  if (currentIndex === -1) {
-    currentIndex = 0;
-    loadVideoFile(f);
-    renderPlaylist();
-  } else {
-    renderPlaylist();
-    showToast('已加入佇列 (' + playlist.length + ')');
-  }
+  if (currentIndex === -1) { currentIndex = 0; loadVideoFile(f); }
+  else { renderPlaylist(); showToast('已加入佇列 (' + playlist.length + ')'); }
 });
+
 document.getElementById('change-video-btn').addEventListener('click', e => {
   e.stopPropagation(); changeInput.click();
 });
@@ -1274,8 +1279,8 @@ video.addEventListener('ended', () => {
     skipThumbOnLoad = true;
     loadVideoFile(playlist[currentIndex].file);
     renderPlaylist();
-    video.addEventListener('canplay', function autoPlay() {
-      video.removeEventListener('canplay', autoPlay);
+    video.addEventListener('canplay', function ap() {
+      video.removeEventListener('canplay', ap);
       video.play(); isPlaying = true; setPlayIcon(true);
     });
     return;
@@ -1651,17 +1656,13 @@ function buildStco(offs){
   }
 
 async function readChunk(start, end) {
-  const MAX_READ = 64 * 1024 * 1024; // 64MB iOS safe limit
+  const MAX_READ = 64 * 1024 * 1024;
   async function readOnce(s, e) {
     for (let attempt = 0; attempt < 3; attempt++) {
       try {
         const buf = await new Promise((res, rej) => {
           const r = new FileReader();
-          r.onload = ev => {
-            const ab = ev.target.result;
-            if (!ab || ab.byteLength === 0) rej(new Error('empty'));
-            else res(ab);
-          };
+          r.onload = ev => { const ab = ev.target.result; if (!ab || ab.byteLength === 0) rej(new Error('empty')); else res(ab); };
           r.onerror = () => rej(new Error('fr'));
           r.readAsArrayBuffer(currentFile.slice(s, e));
         });
@@ -1679,10 +1680,9 @@ async function readChunk(start, end) {
     parts.push(await readOnce(pos, Math.min(pos + MAX_READ, end)));
   }
   const total = parts.reduce((n, p) => n + p.byteLength, 0);
-  const out = new Uint8Array(total);
-  let off = 0;
-  for (const p of parts) { out.set(p, off); off += p.byteLength; }
-  return out;
+  const merged = new Uint8Array(total);
+  let off = 0; for (const p of parts) { merged.set(p, off); off += p.byteLength; }
+  return merged;
 }
 
 async function trimMp4(file, startSec, endSec, onProgress) {
@@ -2443,6 +2443,29 @@ function renderPlaylist() {
     resetAutoHide();
   });
 })();
+
+const _plList = document.getElementById('playlist-list');
+const _plPanel = document.getElementById('playlist-panel');
+function renderPlaylist() {
+  if (!_plList) return;
+  _plList.innerHTML = '';
+  playlist.forEach((item, i) => {
+    const li = document.createElement('li');
+    li.className = 'pl-item' + (i === currentIndex ? ' current' : '');
+    li.innerHTML = '<span class="pl-idx">' + (i+1) + '</span><span class="pl-name">' + item.name + '</span><span class="pl-del">✕</span>';
+    li.querySelector('.pl-del').addEventListener('click', ev => { ev.stopPropagation(); playlist.splice(i,1); if(currentIndex>=playlist.length) currentIndex=playlist.length-1; renderPlaylist(); });
+    li.addEventListener('click', ev => { ev.stopPropagation(); currentIndex=i; skipThumbOnLoad=false; loadVideoFile(playlist[i].file); renderPlaylist(); });
+    _plList.appendChild(li);
+  });
+  if (_plPanel) _plPanel.style.display = playlist.length > 1 ? 'block' : 'none';
+}
+(function(){
+  const btn = document.getElementById('auto-next-toggle');
+  if (!btn) return;
+  btn.classList.toggle('active', autoPlayNext);
+  btn.addEventListener('click', e => { e.stopPropagation(); autoPlayNext=!autoPlayNext; btn.classList.toggle('active',autoPlayNext); showToast(autoPlayNext?'已開啟連續播放':'已關閉連續播放'); resetAutoHide(); });
+})();
+
 </script>
 </body>
 </html>
