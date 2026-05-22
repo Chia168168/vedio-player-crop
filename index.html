@@ -483,7 +483,7 @@ if ('serviceWorker' in navigator) {
 <!-- Player -->
 <div id="player-screen">
   <div id="video-container">
-    <video id="video" playsinline webkit-playsinline></video>
+    <video id="video" playsinline webkit-playsinline preload="metadata"></video>
   </div>
 
   <div id="tap-overlay"></div>
@@ -951,8 +951,10 @@ function loadVideoFile(file) {
   // Clear stall timer once loaded
   video.addEventListener('loadedmetadata', () => clearTimeout(stallTimer), { once: true });
 
-  // Set src - browser will auto-load with preload=metadata
+  // Set src - browser will auto-load (force load if needed on iOS)
   video.src = currentBlobUrl;
+  // Safari sometimes needs explicit load() after src change
+  setTimeout(() => { if (video.readyState === 0) video.load(); }, 50);
   // start preloading next video in background
   setTimeout(preloadNext, 500);
 }
@@ -1295,6 +1297,7 @@ video.addEventListener('ended', () => {
       uploadScreen.style.display = 'none';
       playerScreen.style.display = 'block';
       video.src = currentBlobUrl;
+      setTimeout(() => { if (video.readyState === 0) video.load(); }, 50);
       video.addEventListener('loadedmetadata', function lm() {
         video.removeEventListener('loadedmetadata', lm);
         duration = video.duration;
@@ -2510,8 +2513,6 @@ function renderPlaylist() {
     _plList.appendChild(li);
   });
   if (_plPanel) _plPanel.style.display = playlist.length > 1 ? 'block' : 'none';
-}
-block' : 'none';
 }
 </script>
 </body>
