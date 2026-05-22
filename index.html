@@ -863,6 +863,7 @@ document.getElementById('change-video-btn').addEventListener('click', e => {
 });
 
 function loadVideoFile(file) {
+  alert('loadVideoFile start: ' + file.name);
   stopFrameMode();
   video.pause();
   isPlaying = false; setPlayIcon(false);
@@ -929,6 +930,7 @@ function loadVideoFile(file) {
 }
 
 function onMetaLoaded() {
+  alert('onMetaLoaded');
   if (!video.duration || isNaN(video.duration)) {
     showToast('無法讀取影片資訊');
     thumbStatus.textContent = '載入失敗';
