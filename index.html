@@ -951,6 +951,7 @@ function loadVideoFile(file) {
 
   // Set src - browser will auto-load (force load if needed on iOS)
   video.src = currentBlobUrl;
+  video.style.opacity = '1';
   // Safari sometimes needs explicit load() after src change
   setTimeout(() => { if (video.readyState === 0) video.load(); }, 50);
   // start preloading next video in background
