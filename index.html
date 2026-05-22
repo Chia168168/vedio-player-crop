@@ -954,9 +954,7 @@ function loadVideoFile(file) {
 
   // Set src - auto-load with conditional fallback
   video.src = currentBlobUrl;
-  setTimeout(() => { if (video.readyState === 0) video.load(); }, 50);
   // start preloading next video in background
-  setTimeout(preloadNext, 500);
 }
 
 function onMetaLoaded() {
@@ -1297,16 +1295,14 @@ video.addEventListener('ended', () => {
       uploadScreen.style.display = 'none';
       playerScreen.style.display = 'block';
       video.src = currentBlobUrl;
-      setTimeout(() => { if (video.readyState === 0) video.load(); }, 50);
-      video.addEventListener('loadedmetadata', function lm() {
+          video.addEventListener('loadedmetadata', function lm() {
         video.removeEventListener('loadedmetadata', lm);
         duration = video.duration;
         totalTimeLabel.textContent = formatTime(duration);
         thumbStatus.style.display = 'none';
         updateUI();
         renderPlaylist();
-        setTimeout(preloadNext, 500);
-      }, { once: true });
+            }, { once: true });
       video.addEventListener('canplay', function ap() {
         video.removeEventListener('canplay', ap);
         video.play(); isPlaying = true; setPlayIcon(true);
