@@ -456,22 +456,6 @@
 </style>
 
 <script>
-const __logEl = document.getElementById('log-panel');
-function __log(...args) {
-  const s = args.map(v => typeof v === 'string' ? v : JSON.stringify(v)).join(' ');
-  if (__logEl) {
-    __logEl.style.display = 'block';
-    __logEl.textContent += s + '
-';
-    __logEl.scrollTop = __logEl.scrollHeight;
-  }
-  console.log(s);
-}
-window.addEventListener('error', e => __log('[ERROR]', e.message));
-window.addEventListener('unhandledrejection', e => __log('[REJECTION]', String(e.reason)));
-__log('[INIT] start');
-
-
 /* Register Service Worker for COI headers (SharedArrayBuffer support) */
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('./sw.js', { scope: './' })
@@ -480,8 +464,6 @@ if ('serviceWorker' in navigator) {
 </script>
 </head>
 <body>
-<div id="log-panel" style="position:fixed;left:8px;right:8px;bottom:8px;max-height:28vh;overflow:auto;background:rgba(0,0,0,.82);color:#7CFF7C;font:12px/1.4 monospace;padding:8px;border:1px solid rgba(124,255,124,.35);border-radius:8px;z-index:999999;white-space:pre-wrap;pointer-events:none;display:none;"></div>
-
 
 <!-- Upload -->
 <div id="upload-screen">
@@ -857,8 +839,9 @@ changeInput.accept = 'video/*';
 changeInput.style.display = 'none';
 document.body.appendChild(changeInput);
 
-fileInput.addEventListener('change', e => { __log('[file-change event]');
+fileInput.addEventListener('change', e => {
   const f = e.target.files && e.target.files[0];
+  alert(f ? ('selected: ' + f.name) : 'no file');
   if (!f) return;
   fileInput.value = '';
   playlist.push({ file: f, name: f.name });
@@ -875,7 +858,6 @@ changeInput.addEventListener('change', e => {
   else { renderPlaylist(); showToast('已加入佇列 (' + playlist.length + ')'); }
 });
 
-__log('[change-video-btn handler installed]');
 document.getElementById('change-video-btn').addEventListener('click', e => {
   e.stopPropagation(); changeInput.click();
 });
