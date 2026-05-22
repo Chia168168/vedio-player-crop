@@ -863,8 +863,7 @@ document.getElementById('change-video-btn').addEventListener('click', e => {
 });
 
 function loadVideoFile(file) {
-  alert('enter loadVideoFile');
-    stopFrameMode();
+      stopFrameMode();
   video.pause();
   isPlaying = false; setPlayIcon(false);
   duration = 0;
@@ -907,8 +906,7 @@ function loadVideoFile(file) {
   // Remove any previous listeners before adding new ones
   video.removeEventListener('loadedmetadata', onMeta);
   video.addEventListener('loadedmetadata', onMeta, { once: true });
-  video.onerror = () => alert('video.onerror');
-  video.addEventListener('canplaythrough', function probe() {
+  video.onerror = () =>   video.addEventListener('canplaythrough', function probe() {
     video.removeEventListener('canplaythrough', probe);
     if (!metaFired && video.duration > 0) onMeta();
   }, { once: true });
@@ -931,14 +929,14 @@ function loadVideoFile(file) {
 }
 
 function onMetaLoaded() {
-  alert('enter onMetaLoaded');
-    if (!video.duration || isNaN(video.duration)) {
+  try {
+      if (!video.duration || isNaN(video.duration)) {
     showToast('無法讀取影片資訊');
     thumbStatus.textContent = '載入失敗';
     return;
   }
-  alert('onMetaLoaded body start');
-  duration = video.duration;
+    duration = video.duration;
+  thumbStatus.textContent = 'metadata ok';
   fpsDetected = false;
   fps = 30;
   totalTimeLabel.textContent = formatTime(duration);
@@ -946,6 +944,10 @@ function onMetaLoaded() {
   thumbStatus.style.display = 'block';
   updateUI();
   updateLoopOverlay();
+  } catch (err) {
+        return;
+  }
+
   if (skipFpsAndThumb) {
     skipFpsAndThumb = false;
     thumbStatus.style.display = 'none';
