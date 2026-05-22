@@ -456,6 +456,21 @@
 </style>
 
 <script>
+const __logEl = document.getElementById('log-panel');
+function __log(...args) {
+  const s = args.map(v => typeof v === 'string' ? v : JSON.stringify(v)).join(' ');
+  if (__logEl) {
+    __logEl.style.display = 'block';
+    __logEl.textContent += s + '
+';
+    __logEl.scrollTop = __logEl.scrollHeight;
+  }
+  console.log(s);
+}
+window.addEventListener('error', e => __log('[ERROR]', e.message));
+window.addEventListener('unhandledrejection', e => __log('[REJECTION]', String(e.reason)));
+
+
 /* Register Service Worker for COI headers (SharedArrayBuffer support) */
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('./sw.js', { scope: './' })
@@ -630,7 +645,7 @@ if ('serviceWorker' in navigator) {
 <script>
 const video             = document.getElementById('video');
 const fileInput         = document.getElementById('file-input');
-fileInput.addEventListener('click', () => console.log('[file-click]'));
+__log('[INIT] fileInput ready');
 const uploadScreen      = document.getElementById('upload-screen');
 const playerScreen      = document.getElementById('player-screen');
 const playBtn           = document.getElementById('play-btn');
@@ -842,7 +857,6 @@ document.body.appendChild(changeInput);
 
 fileInput.addEventListener('change', e => {
   const f = e.target.files && e.target.files[0];
-  console.log('[file-change]', !!f, f && f.name, f && f.size);
   if (!f) return;
   fileInput.value = '';
   playlist.push({ file: f, name: f.name });
@@ -2438,6 +2452,12 @@ function renderPlaylist() {
     li.className = 'pl-item' + (i === currentIndex ? ' current' : '');
     li.innerHTML = '<span class="pl-idx">' + (i+1) + '</span><span class="pl-name">' + item.name + '</span><span class="pl-del">✕</span>';
     li.querySelector('.pl-del').addEventListener('click', ev => { ev.stopPropagation(); playlist.splice(i,1); if(currentIndex>=playlist.length) currentIndex=playlist.length-1; renderPlaylist(); });
+    li.addEventListener('click', ev => { ev.stopPropagation(); currentIndex=i; skipThumbOnLoad=false; loadVideoFile(playlist[i].file); renderPlaylist(); });
+    _plList.appendChild(li);
+  });
+  if (_plPanel) _plPanel.style.display = playlist.length > 1 ? 'block' : 'none';
+}
+laylist.length-1; renderPlaylist(); });
     li.addEventListener('click', ev => { ev.stopPropagation(); currentIndex=i; skipThumbOnLoad=false; loadVideoFile(playlist[i].file); renderPlaylist(); });
     _plList.appendChild(li);
   });
