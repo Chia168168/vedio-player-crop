@@ -925,35 +925,17 @@ function loadVideoFile(file) {
   showPanel();
   requestWakeLock();
 
-  let metaFired = false;
-  function onMeta() {
-    if (metaFired) return;
-    metaFired = true;
+  // Direct load path: set src and wait for canplay
+  video.src = currentBlobUrl;
+  video.addEventListener('canplay', function onCanPlay() {
+    video.removeEventListener('canplay', onCanPlay);
     onMetaLoaded();
-  }
-
-  // Remove any previous listeners before adding new ones
-  video.removeEventListener('loadedmetadata', onMeta);
-  video.addEventListener('loadedmetadata', onMeta, { once: true });
-  video.addEventListener('canplaythrough', function probe() {
-    video.removeEventListener('canplaythrough', probe);
-    if (!metaFired && video.duration > 0) onMeta();
   }, { once: true });
 
-  // Stall detection — if nothing fires in 10s, show error
-  const stallTimer = setTimeout(() => {
-    if (!metaFired) {
-      if (video.duration > 0) { onMeta(); return; }
-      thumbStatus.textContent = '載入逾時，請重新選擇';
-      showToast('載入逾時');
-    }
-  }, 10000);
-
-  // Clear stall timer once loaded
-  video.addEventListener('loadedmetadata', () => clearTimeout(stallTimer), { once: true });
-
-  // Set src - auto-load with conditional fallback
-  video.src = currentBlobUrl;
+  // Fallback: if canplay doesn't arrive, still try after a short delay
+  setTimeout(() => {
+    if (video.readyState >= 3) onMetaLoaded();
+  }, 800);
   // start preloading next video in background
 }
 
