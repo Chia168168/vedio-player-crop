@@ -1299,9 +1299,13 @@ video.addEventListener('ended', () => {
       uploadScreen.style.display = 'none';
       playerScreen.style.display = 'block';
       console.log('[DEBUG] Switching video, fade out');
+      video.pause();
+      isPlaying = false;
       video.style.opacity = '0';
-      setTimeout(() => { video.src = currentBlobUrl; }, 50);
-      setTimeout(() => { if (video.readyState === 0) video.load(); }, 50);
+      requestAnimationFrame(() => {
+        video.src = currentBlobUrl;
+        if (video.readyState === 0) video.load();
+      });
       video.addEventListener('loadedmetadata', function lm() {
         video.removeEventListener('loadedmetadata', lm);
         duration = video.duration;
