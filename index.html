@@ -469,6 +469,7 @@ function __log(...args) {
 }
 window.addEventListener('error', e => __log('[ERROR]', e.message));
 window.addEventListener('unhandledrejection', e => __log('[REJECTION]', String(e.reason)));
+__log('[INIT] start');
 
 
 /* Register Service Worker for COI headers (SharedArrayBuffer support) */
@@ -479,6 +480,8 @@ if ('serviceWorker' in navigator) {
 </script>
 </head>
 <body>
+<div id="log-panel" style="position:fixed;left:8px;right:8px;bottom:8px;max-height:28vh;overflow:auto;background:rgba(0,0,0,.82);color:#7CFF7C;font:12px/1.4 monospace;padding:8px;border:1px solid rgba(124,255,124,.35);border-radius:8px;z-index:999999;white-space:pre-wrap;pointer-events:none;display:none;"></div>
+
 
 <!-- Upload -->
 <div id="upload-screen">
@@ -645,7 +648,6 @@ if ('serviceWorker' in navigator) {
 <script>
 const video             = document.getElementById('video');
 const fileInput         = document.getElementById('file-input');
-__log('[INIT] fileInput ready');
 const uploadScreen      = document.getElementById('upload-screen');
 const playerScreen      = document.getElementById('player-screen');
 const playBtn           = document.getElementById('play-btn');
@@ -855,7 +857,7 @@ changeInput.accept = 'video/*';
 changeInput.style.display = 'none';
 document.body.appendChild(changeInput);
 
-fileInput.addEventListener('change', e => {
+fileInput.addEventListener('change', e => { __log('[file-change event]');
   const f = e.target.files && e.target.files[0];
   if (!f) return;
   fileInput.value = '';
@@ -873,6 +875,7 @@ changeInput.addEventListener('change', e => {
   else { renderPlaylist(); showToast('已加入佇列 (' + playlist.length + ')'); }
 });
 
+__log('[change-video-btn handler installed]');
 document.getElementById('change-video-btn').addEventListener('click', e => {
   e.stopPropagation(); changeInput.click();
 });
@@ -2452,12 +2455,6 @@ function renderPlaylist() {
     li.className = 'pl-item' + (i === currentIndex ? ' current' : '');
     li.innerHTML = '<span class="pl-idx">' + (i+1) + '</span><span class="pl-name">' + item.name + '</span><span class="pl-del">✕</span>';
     li.querySelector('.pl-del').addEventListener('click', ev => { ev.stopPropagation(); playlist.splice(i,1); if(currentIndex>=playlist.length) currentIndex=playlist.length-1; renderPlaylist(); });
-    li.addEventListener('click', ev => { ev.stopPropagation(); currentIndex=i; skipThumbOnLoad=false; loadVideoFile(playlist[i].file); renderPlaylist(); });
-    _plList.appendChild(li);
-  });
-  if (_plPanel) _plPanel.style.display = playlist.length > 1 ? 'block' : 'none';
-}
-laylist.length-1; renderPlaylist(); });
     li.addEventListener('click', ev => { ev.stopPropagation(); currentIndex=i; skipThumbOnLoad=false; loadVideoFile(playlist[i].file); renderPlaylist(); });
     _plList.appendChild(li);
   });
