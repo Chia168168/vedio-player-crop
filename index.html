@@ -456,14 +456,9 @@
 </style>
 
 <script>
-const pickBtn = document.getElementById('pick-btn');
 const fileInput = document.getElementById('file-input');
 const result = document.getElementById('result');
 console.log('[TEST] script loaded');
-pickBtn.addEventListener('click', () => {
-  console.log('[TEST] pick button clicked');
-  fileInput.click();
-});
 fileInput.addEventListener('change', e => {
   const f = e.target.files && e.target.files[0];
   console.log('[TEST] file change', f && f.name, f && f.size);
@@ -474,9 +469,8 @@ size: ${f.size}` : 'no file';
 </head>
 <body>
   <div style="padding:24px;font-family:sans-serif;color:#fff;background:#111;min-height:100vh;">
-    <button id="pick-btn" style="padding:12px 18px;font-size:16px;">選擇影片</button>
-    <div id="result" style="margin-top:16px;font-size:14px;white-space:pre-wrap;"></div>
-    <input type="file" id="file-input" accept="video/*" style="display:none;">
+    <div id="result" style="margin-bottom:16px;font-size:14px;white-space:pre-wrap;">請直接點下面的原生檔案選擇器</div>
+    <input type="file" id="file-input" accept="video/*" style="display:block;padding:12px;background:#222;color:#fff;border:1px solid #555;border-radius:8px;">
   </div>
 </body>
 </html>
