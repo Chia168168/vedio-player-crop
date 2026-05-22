@@ -97,7 +97,7 @@
     width: 100%; height: 100%;
     display: block; object-fit: contain;
     transform-origin: center center;
-    transition: none;
+    transition: opacity 0.15s ease;
     will-change: transform;
   }
 
@@ -453,9 +453,7 @@
 .pl-idx { width:16px; text-align:right; opacity:0.4; flex-shrink:0; }
 .pl-name { flex:1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .pl-del { flex-shrink:0; font-size:12px; opacity:0.3; padding:0 4px; color:#fff; }
-</style>
-
-<script>
+</st
 /* Register Service Worker for COI headers (SharedArrayBuffer support) */
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('./sw.js', { scope: './' })
@@ -1296,6 +1294,11 @@ video.addEventListener('ended', () => {
       resetLoop();
       uploadScreen.style.display = 'none';
       playerScreen.style.display = 'block';
+      // pause before changing src to reduce visual jump
+      video.pause();
+      isPlaying = false;
+      // temporarily hide video during src transition
+      video.style.opacity = '0';
       video.src = currentBlobUrl;
       setTimeout(() => { if (video.readyState === 0) video.load(); }, 50);
       video.addEventListener('loadedmetadata', function lm() {
@@ -1309,6 +1312,7 @@ video.addEventListener('ended', () => {
       }, { once: true });
       video.addEventListener('canplay', function ap() {
         video.removeEventListener('canplay', ap);
+        video.style.opacity = '1';
         video.play(); isPlaying = true; setPlayIcon(true);
       });
     } else {
@@ -1316,6 +1320,7 @@ video.addEventListener('ended', () => {
       renderPlaylist();
       video.addEventListener('canplay', function ap() {
         video.removeEventListener('canplay', ap);
+        video.style.opacity = '1';
         video.play(); isPlaying = true; setPlayIcon(true);
       });
     }
@@ -2513,6 +2518,8 @@ function renderPlaylist() {
     _plList.appendChild(li);
   });
   if (_plPanel) _plPanel.style.display = playlist.length > 1 ? 'block' : 'none';
+}
+' : 'none';
 }
 </script>
 </body>
