@@ -504,7 +504,7 @@ if ('serviceWorker' in navigator) {
 
 <!-- Upload -->
 <div id="upload-screen">
-  <div class="logo">影片播放器</div>
+  <div class="logo">Video Frame Player</div>
   <div class="upload-zone">
     <input type="file" id="file-input" accept="video/*">
     <div class="upload-icon">
@@ -1703,7 +1703,6 @@ async function trimMp4(file, startSec, endSec, onProgress) {
   async function readSlice(s, e) {
     const size = e - s;
     if (size <= 0) return new ArrayBuffer(0);
-    // retry wrapper — iOS FileReader can transiently fail even on tiny reads
     async function readOnceSlice(from, to) {
       for (let attempt = 0; attempt < 4; attempt++) {
         try {
@@ -1727,7 +1726,6 @@ async function trimMp4(file, startSec, endSec, onProgress) {
     if (size <= FR_CHUNK) {
       return readOnceSlice(s, e);
     }
-    // large slice: read in FR_CHUNK pieces and concat
     const parts = [];
     for (let pos = s; pos < e; pos += FR_CHUNK) {
       if (exportCancelled) throw new Error('cancelled');
@@ -2362,7 +2360,6 @@ document.getElementById('loop-export').addEventListener('click', async e => {
         const baseProgress  = Math.round(100 * i / nParts);
         const progressRange = Math.round(100 / nParts);
         await processTrimSegment(segIn, segOut, filename, partLabel, baseProgress, progressRange);
-        // give iOS time to release memory between segments
         await new Promise(r => setTimeout(r, 600));
       }
     } else {
@@ -2481,13 +2478,6 @@ function renderPlaylist() {
   });
   if (_plPanel) _plPanel.style.display = playlist.length > 1 ? 'block' : 'none';
 }
-(function(){
-  const btn = document.getElementById('auto-next-toggle');
-  if (!btn) return;
-  btn.classList.toggle('active', autoPlayNext);
-  btn.addEventListener('click', e => { e.stopPropagation(); autoPlayNext=!autoPlayNext; btn.classList.toggle('active',autoPlayNext); showToast(autoPlayNext?'已開啟連續播放':'已關閉連續播放'); resetAutoHide(); });
-})();
-
 </script>
 </body>
 </html>
