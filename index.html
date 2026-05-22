@@ -97,8 +97,8 @@
     width: 100%; height: 100%;
     display: block; object-fit: contain;
     transform-origin: center center;
-    transition: none;
-    will-change: transform;
+    transition: opacity 0.15s ease;
+    will-change: transform, opacity;
   }
 
   /* Tap zone over video */
@@ -452,10 +452,7 @@
 #playlist-list .pl-item.current { color:var(--accent2); }
 .pl-idx { width:16px; text-align:right; opacity:0.4; flex-shrink:0; }
 .pl-name { flex:1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-.pl-del { flex-shrink:0; font-size:12px; opacity:0.3; padding:0 4px; color:#fff; }
-</style>
-
-<script>
+.pl-del { flex-shrink:0; font-size:12px; opacity:0.3; padding:0 4px; color:#ff
 /* Register Service Worker for COI headers (SharedArrayBuffer support) */
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('./sw.js', { scope: './' })
@@ -629,6 +626,7 @@ if ('serviceWorker' in navigator) {
 
 <script>
 const video             = document.getElementById('video');
+video.style.opacity = '1';
 const fileInput         = document.getElementById('file-input');
 const uploadScreen      = document.getElementById('upload-screen');
 const playerScreen      = document.getElementById('player-screen');
@@ -1295,6 +1293,9 @@ video.addEventListener('ended', () => {
       resetLoop();
       uploadScreen.style.display = 'none';
       playerScreen.style.display = 'block';
+      video.pause();
+      isPlaying = false;
+      video.style.opacity = '0';
       video.src = currentBlobUrl;
       setTimeout(() => { if (video.readyState === 0) video.load(); }, 50);
       video.addEventListener('loadedmetadata', function lm() {
@@ -1308,6 +1309,7 @@ video.addEventListener('ended', () => {
       }, { once: true });
       video.addEventListener('canplay', function ap() {
         video.removeEventListener('canplay', ap);
+        video.style.opacity = '1';
         video.play(); isPlaying = true; setPlayIcon(true);
       });
     } else {
@@ -1315,6 +1317,7 @@ video.addEventListener('ended', () => {
       renderPlaylist();
       video.addEventListener('canplay', function ap() {
         video.removeEventListener('canplay', ap);
+        video.style.opacity = '1';
         video.play(); isPlaying = true; setPlayIcon(true);
       });
     }
@@ -2512,6 +2515,8 @@ function renderPlaylist() {
     _plList.appendChild(li);
   });
   if (_plPanel) _plPanel.style.display = playlist.length > 1 ? 'block' : 'none';
+}
+ ? 'block' : 'none';
 }
 </script>
 </body>
