@@ -482,7 +482,9 @@ if ('serviceWorker' in navigator) {
 
 <!-- Player -->
 <div id="player-screen">
-  <div id="video-container">
+<div id="video-container">
+  <canvas id="freeze-canvas" style="position:absolute;inset:0;width:100%;height:100%;object-fit:contain;display:none;z-index:2;pointer-events:none;"></canvas>
+    
     <video id="video" playsinline webkit-playsinline></video>
   </div>
 
