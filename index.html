@@ -1651,6 +1651,8 @@ function buildStco(offs){
   }
 
 async function readChunk(start, end) {
+  const MAX_READ = 64 * 1024 * 1024; // 64MB iOS safe limit
+  async function readOnce(s, e) {
     for (let attempt = 0; attempt < 3; attempt++) {
       try {
         const buf = await new Promise((res, rej) => {
@@ -1661,15 +1663,27 @@ async function readChunk(start, end) {
             else res(ab);
           };
           r.onerror = () => rej(new Error('fr'));
-          r.readAsArrayBuffer(currentFile.slice(start, end));
+          r.readAsArrayBuffer(currentFile.slice(s, e));
         });
         return new Uint8Array(buf);
       } catch(_) {
-        if (attempt === 2) throw new Error('讀取失敗 @ ' + start);
+        if (attempt === 2) throw new Error('讀取失敗 @ ' + s);
         await new Promise(r => setTimeout(r, 150 * (attempt + 1)));
       }
     }
   }
+  if (end - start <= MAX_READ) return readOnce(start, end);
+  const parts = [];
+  for (let pos = start; pos < end; pos += MAX_READ) {
+    if (exportCancelled) throw new Error('cancelled');
+    parts.push(await readOnce(pos, Math.min(pos + MAX_READ, end)));
+  }
+  const total = parts.reduce((n, p) => n + p.byteLength, 0);
+  const out = new Uint8Array(total);
+  let off = 0;
+  for (const p of parts) { out.set(p, off); off += p.byteLength; }
+  return out;
+}
 
 async function trimMp4(file, startSec, endSec, onProgress) {
   const fileSize = file.size;
