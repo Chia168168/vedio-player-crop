@@ -1189,47 +1189,44 @@ async function generateThumbnails() {
   const vh = video.videoHeight || 9;
   const aspect = vw / vh;
 
-  // For large files or high-res video, scale down canvas backing to save memory
+  // Large-file memory strategy: keep display size, but reduce decode/backing work
   const fileSize = currentFile ? currentFile.size : 0;
   const isLarge = fileSize > 1000 * 1024 * 1024 || video.videoWidth >= 3840;
   const scale = isLarge ? 0.5 : 1;
-  // Display: tw = natural aspect-ratio width, H = full strip height (25px from CSS)
   const tw = Math.round(H * aspect);
-  const cw = Math.max(1, Math.round(tw * scale));  // canvas backing width 同比例縮放
-  const ch = Math.max(1, Math.round(H * scale));   // canvas backing height 同比例縮放
-  // Auto count: fill strip width with natural-width thumbs
-  const count = Math.max(6, Math.round(W / tw));
+  const cw = Math.max(1, Math.round(tw * scale));
+  const ch = Math.max(1, Math.round(H * scale));
 
-  // Skip first ~1% of video to avoid black frames at start
+  // Keep strip filled, but use fewer thumbs on large files to reduce seeks/decodes
+  const baseCount = Math.max(6, Math.round(W / tw));
+  const count = isLarge ? Math.max(8, Math.min(13, Math.ceil(baseCount / 2))) : baseCount;
+
   const startOffset = Math.max(0.5, duration * 0.01);
   const usableDuration = duration - startOffset;
+  const step = usableDuration / count;
 
   for (let i = 0; i < count; i++) {
-    if (thumbGenId !== myId) return; // cancelled by new load
+    if (thumbGenId !== myId) return;
     try {
-      const t = startOffset + (i / count) * usableDuration;
+      const t = startOffset + i * step;
       await seekExact(t);
       if (thumbGenId !== myId) return;
 
       let c = await drawThumb(t, cw, ch);
-      // detect black frame: sample a few pixels from center
-      const check = c.getContext('2d').getImageData(Math.floor(cw/2)-1, Math.floor(ch/2)-1, 3, 3).data;
-      const avg = (check[0]+check[1]+check[2]+check[4]+check[5]+check[6]) / 6;
-      if (avg < 8 && i === 0) {
-        // retry with offset +2s or 2% further
-        const retryT = Math.min(duration - 0.5, t + Math.max(2, duration * 0.02));
-        c = await drawThumb(retryT);
+      if (!isLarge) {
+        const check = c.getContext('2d').getImageData(Math.floor(cw/2)-1, Math.floor(ch/2)-1, 3, 3).data;
+        const avg = (check[0]+check[1]+check[2]+check[4]+check[5]+check[6]) / 6;
+        if (avg < 8 && i === 0) {
+          const retryT = Math.min(duration - 0.5, t + Math.max(2, duration * 0.02));
+          c = await drawThumb(retryT, cw, ch);
+        }
       }
 
-      // 大小檔顯示方式一樣：寬=等比例tw，高=strip全高；大檔canvas縮半省記憶體
       c.style.cssText = `width:${tw}px;height:${H}px;flex-shrink:0;`;
       thumbCanvasStrip.appendChild(c);
       thumbStatus.textContent = `縮圖 ${i + 1}/${count}`;
-    } catch(e) {
-      // Skip this frame if seek fails
-    }
-    // yield to browser to keep UI responsive
-    await new Promise(r => setTimeout(r, 0));
+    } catch(e) {}
+    await new Promise(r => setTimeout(r, isLarge ? 16 : 0));
   }
 
   if (thumbGenId !== myId) return;
