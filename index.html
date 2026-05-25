@@ -308,7 +308,7 @@
     transition: width 0.08s linear;
   }
   #thumbnail-strip {
-    position: relative; height: 50px;
+    position: relative; height: 25px;
     border-radius: 8px; overflow: hidden;
     background: rgba(255,255,255,0.05);
     border: 1px solid rgba(255,255,255,0.08);
@@ -1189,22 +1189,19 @@ async function generateThumbnails() {
   const vh = video.videoHeight || 9;
   const aspect = vw / vh;
 
-  // For large files or high-res video, scale down canvas to avoid memory pressure
+  // For large files or high-res video, scale down canvas backing to save memory
   const fileSize = currentFile ? currentFile.size : 0;
   const isLarge = fileSize > 1000 * 1024 * 1024 || video.videoWidth >= 3840;
   const scale = isLarge ? 0.5 : 1;
-  const tw = Math.round(H * aspect);   // display width per thumb (fills strip)
-  const dh = Math.round(H / 2);        // display height = half (visual size reduction)
+  // Display: tw = natural aspect-ratio width, H = full strip height (already halved in CSS)
+  const tw = Math.round(H * aspect);
   const cw = Math.max(1, Math.round(tw * scale));  // canvas backing width
   const ch = Math.max(1, Math.round(H * scale));   // canvas backing height
+  // Auto count: fill strip width with natural-width thumbs
+  const count = Math.max(6, Math.round(W / tw));
 
-  // Limit count for large files to avoid freezing
-  const rawCount = Math.max(6, Math.round(W / tw));
-  const count = isLarge ? Math.min(rawCount, 13) : rawCount;
-
-  // For large files, skip first 2 positions that tend to be black frames
-  // by starting offset slightly into the video
-  const startOffset = isLarge ? Math.max(1, duration * 0.01) : 0;
+  // Skip first ~1% of video to avoid black frames at start
+  const startOffset = Math.max(0.5, duration * 0.01);
   const usableDuration = duration - startOffset;
 
   for (let i = 0; i < count; i++) {
@@ -1225,7 +1222,7 @@ async function generateThumbnails() {
       }
 
       // 小檔：canvas全尺寸，顯示寬=tw(充滿)，高=H/2 → 銳利；大檔：canvas縮半，顯示同樣 → 省記憶體
-      c.style.cssText = `width:${tw}px;height:${dh}px;flex-shrink:0;`;
+      c.style.cssText = `width:${tw}px;height:${H}px;flex-shrink:0;`;
       thumbCanvasStrip.appendChild(c);
       thumbStatus.textContent = `縮圖 ${i + 1}/${count}`;
     } catch(e) {
