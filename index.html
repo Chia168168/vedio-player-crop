@@ -1193,9 +1193,10 @@ async function generateThumbnails() {
   const fileSize = currentFile ? currentFile.size : 0;
   const isLarge = fileSize > 1000 * 1024 * 1024 || video.videoWidth >= 3840;
   const scale = isLarge ? 0.5 : 1;
-  const tw = Math.round(H * aspect);
-  const cw = Math.max(1, Math.round(tw * scale));
-  const ch = Math.max(1, Math.round(H * scale));
+  const tw = Math.round(H * aspect);   // display width per thumb (fills strip)
+  const dh = Math.round(H / 2);        // display height = half (visual size reduction)
+  const cw = Math.max(1, Math.round(tw * scale));  // canvas backing width
+  const ch = Math.max(1, Math.round(H * scale));   // canvas backing height
 
   // Limit count for large files to avoid freezing
   const rawCount = Math.max(6, Math.round(W / tw));
@@ -1223,8 +1224,8 @@ async function generateThumbnails() {
         c = await drawThumb(retryT);
       }
 
-      // 小檔：canvas全尺寸 + 顯示縮一半 = 銳利；大檔：canvas縮一半 + 顯示縮一半 = 省記憶體
-      c.style.cssText = `width:${Math.round(tw/2)}px;height:${Math.round(H/2)}px;flex-shrink:0;`;
+      // 小檔：canvas全尺寸，顯示寬=tw(充滿)，高=H/2 → 銳利；大檔：canvas縮半，顯示同樣 → 省記憶體
+      c.style.cssText = `width:${tw}px;height:${dh}px;flex-shrink:0;`;
       thumbCanvasStrip.appendChild(c);
       thumbStatus.textContent = `縮圖 ${i + 1}/${count}`;
     } catch(e) {
