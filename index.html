@@ -1176,8 +1176,8 @@ async function generateThumbnails() {
   const myId = ++thumbGenId;
   thumbCanvasStrip.innerHTML = '';
   thumbStatus.style.display = 'block';
-  thumbStatus.textContent = '生成縮圖中…';
-  await new Promise(r => setTimeout(r, 100));
+  thumbStatus.textContent = '載入占位縮圖…';
+  await new Promise(r => setTimeout(r, 0));
 
   if (!video.videoWidth || !video.duration) {
     thumbStatus.style.display = 'none'; return;
@@ -1188,50 +1188,69 @@ async function generateThumbnails() {
   const vw = video.videoWidth || 16;
   const vh = video.videoHeight || 9;
   const aspect = vw / vh;
-
-  // Large-file strategy: avoid expensive frame extraction loop while still filling strip
   const fileSize = currentFile ? currentFile.size : 0;
   const isLarge = fileSize > 1000 * 1024 * 1024 || video.videoWidth >= 3840;
   const tw = Math.round(H * aspect);
-  const cw = Math.max(1, Math.round(tw * (isLarge ? 0.5 : 1)));
-  const ch = Math.max(1, Math.round(H * (isLarge ? 0.5 : 1)));
-
   const baseCount = Math.max(6, Math.round(W / tw));
   const count = isLarge ? Math.min(13, Math.max(10, Math.ceil(baseCount * 0.75))) : baseCount;
-
   const startOffset = Math.max(0.5, duration * 0.01);
   const usableDuration = duration - startOffset;
   const step = usableDuration / count;
 
+  const placeholder = document.createElement('canvas');
+  placeholder.width = 8;
+  placeholder.height = 8;
+  const pctx = placeholder.getContext('2d');
+  const gradient = pctx.createLinearGradient(0, 0, 8, 8);
+  gradient.addColorStop(0, 'rgba(255,255,255,0.10)');
+  gradient.addColorStop(1, 'rgba(255,255,255,0.04)');
+  pctx.fillStyle = gradient;
+  pctx.fillRect(0, 0, 8, 8);
+
+  for (let i = 0; i < count; i++) {
+    const c = document.createElement('canvas');
+    c.width = tw; c.height = H;
+    c.getContext('2d').drawImage(placeholder, 0, 0, tw, H);
+    c.style.cssText = `width:${tw}px;height:${H}px;flex-shrink:0;`;
+    thumbCanvasStrip.appendChild(c);
+  }
+  thumbStatus.textContent = '背景補圖中…';
+
   const cacheCanvas = document.createElement('canvas');
+  const cw = Math.max(1, Math.round(tw * (isLarge ? 0.5 : 1)));
+  const ch = Math.max(1, Math.round(H * (isLarge ? 0.5 : 1)));
   cacheCanvas.width = cw;
   cacheCanvas.height = ch;
   const cacheCtx = cacheCanvas.getContext('2d');
   cacheCtx.imageSmoothingEnabled = true;
 
-  for (let i = 0; i < count; i++) {
+  let i = 0;
+  async function fillNext() {
     if (thumbGenId !== myId) return;
+    if (i >= count) {
+      thumbStatus.style.display = 'none';
+      try { await seekExact(0); } catch(e) {}
+      updateUI();
+      return;
+    }
     try {
       const t = startOffset + i * step;
       await seekExact(t);
       if (thumbGenId !== myId) return;
-
       cacheCtx.clearRect(0, 0, cw, ch);
       cacheCtx.drawImage(video, 0, 0, cw, ch);
-      const c = document.createElement('canvas');
-      c.width = cw; c.height = ch;
-      c.getContext('2d').drawImage(cacheCanvas, 0, 0);
-      c.style.cssText = `width:${tw}px;height:${H}px;flex-shrink:0;`;
-      thumbCanvasStrip.appendChild(c);
-      thumbStatus.textContent = `縮圖 ${i + 1}/${count}`;
+      const c = thumbCanvasStrip.children[i];
+      if (c) {
+        const ctx = c.getContext('2d');
+        ctx.clearRect(0, 0, tw, H);
+        ctx.drawImage(cacheCanvas, 0, 0, tw, H);
+      }
+      thumbStatus.textContent = `背景補圖 ${i + 1}/${count}`;
     } catch(e) {}
-    await new Promise(r => setTimeout(r, isLarge ? 24 : 0));
+    i++;
+    setTimeout(fillNext, isLarge ? 30 : 0);
   }
-
-  if (thumbGenId !== myId) return;
-  thumbStatus.style.display = 'none';
-  try { await seekExact(0); } catch(e) {}
-  updateUI();
+  fillNext();
 }
 
 // ── Play / Pause ──
