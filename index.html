@@ -308,7 +308,7 @@
     transition: width 0.08s linear;
   }
   #thumbnail-strip {
-    position: relative; height: 25px;
+    position: relative; height: 50px;
     border-radius: 8px; overflow: hidden;
     background: rgba(255,255,255,0.05);
     border: 1px solid rgba(255,255,255,0.08);
@@ -1184,7 +1184,7 @@ async function generateThumbnails() {
   }
 
   const W = thumbnailStrip.offsetWidth || 320;
-  const H = thumbnailStrip.offsetHeight || 25;
+  const H = thumbnailStrip.offsetHeight || 50;
   const vw = video.videoWidth || 16;
   const vh = video.videoHeight || 9;
   const aspect = vw / vh;
