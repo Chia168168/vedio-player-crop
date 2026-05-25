@@ -1192,7 +1192,7 @@ async function generateThumbnails() {
   const isLarge = fileSize > 1000 * 1024 * 1024 || video.videoWidth >= 3840;
   const tw = Math.round(H * aspect);
   const baseCount = Math.max(6, Math.round(W / tw));
-  const count = isLarge ? Math.min(13, Math.max(10, Math.ceil(baseCount * 0.75))) : baseCount;
+  const count = baseCount;
   const startOffset = Math.max(0.5, duration * 0.01);
   const usableDuration = duration - startOffset;
   const step = usableDuration / count;
