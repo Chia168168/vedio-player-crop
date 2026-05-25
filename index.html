@@ -1183,7 +1183,7 @@ async function generateThumbnails() {
 
   // For large files or high-res video, scale down canvas to avoid memory pressure
   const fileSize = currentFile ? currentFile.size : 0;
-  const isLarge = fileSize > 200 * 1024 * 1024 || video.videoWidth >= 3840;
+  const isLarge = fileSize > 1000 * 1024 * 1024 || video.videoWidth >= 3840;
   const scale = isLarge ? 0.5 : 1;
   const tw = Math.round(H * aspect);
   const cw = Math.max(1, Math.round(tw * scale));
@@ -1191,7 +1191,7 @@ async function generateThumbnails() {
 
   // Limit count for large files to avoid freezing
   const rawCount = Math.max(6, Math.round(W / tw));
-  const count = isLarge ? Math.min(rawCount, 8) : rawCount;
+  const count = isLarge ? Math.min(rawCount, 20) : rawCount;
 
   for (let i = 0; i < count; i++) {
     if (thumbGenId !== myId) return; // cancelled by new load
