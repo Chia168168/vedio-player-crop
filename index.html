@@ -841,7 +841,6 @@ document.body.appendChild(changeInput);
 
 fileInput.addEventListener('change', e => {
   const f = e.target.files && e.target.files[0];
-  alert(f ? ('selected: ' + f.name) : 'no file');
   if (!f) return;
   fileInput.value = '';
   playlist.push({ file: f, name: f.name });
@@ -863,7 +862,7 @@ document.getElementById('change-video-btn').addEventListener('click', e => {
 });
 
 function loadVideoFile(file) {
-      stopFrameMode();
+  stopFrameMode();
   video.pause();
   isPlaying = false; setPlayIcon(false);
   duration = 0;
@@ -906,7 +905,7 @@ function loadVideoFile(file) {
   // Remove any previous listeners before adding new ones
   video.removeEventListener('loadedmetadata', onMeta);
   video.addEventListener('loadedmetadata', onMeta, { once: true });
-  video.onerror = () =>   video.addEventListener('canplaythrough', function probe() {
+  video.addEventListener('canplaythrough', function probe() {
     video.removeEventListener('canplaythrough', probe);
     if (!metaFired && video.duration > 0) onMeta();
   }, { once: true });
@@ -929,14 +928,12 @@ function loadVideoFile(file) {
 }
 
 function onMetaLoaded() {
-  try {
-      if (!video.duration || isNaN(video.duration)) {
+  if (!video.duration || isNaN(video.duration)) {
     showToast('無法讀取影片資訊');
     thumbStatus.textContent = '載入失敗';
     return;
   }
-    duration = video.duration;
-  thumbStatus.textContent = 'metadata ok';
+  duration = video.duration;
   fpsDetected = false;
   fps = 30;
   totalTimeLabel.textContent = formatTime(duration);
@@ -944,10 +941,6 @@ function onMetaLoaded() {
   thumbStatus.style.display = 'block';
   updateUI();
   updateLoopOverlay();
-  } catch (err) {
-        return;
-  }
-
   if (skipFpsAndThumb) {
     skipFpsAndThumb = false;
     thumbStatus.style.display = 'none';
@@ -1169,7 +1162,10 @@ function seekExact(t) {
 }
 
 // ── Thumbnails ──
+let thumbGenId = 0; // increment to cancel in-flight generation
+
 async function generateThumbnails() {
+  const myId = ++thumbGenId;
   thumbCanvasStrip.innerHTML = '';
   thumbStatus.style.display = 'block';
   thumbStatus.textContent = '生成縮圖中…';
@@ -1184,22 +1180,38 @@ async function generateThumbnails() {
   const vw = video.videoWidth || 16;
   const vh = video.videoHeight || 9;
   const aspect = vw / vh;
+
+  // For large files or high-res video, scale down canvas to avoid memory pressure
+  const fileSize = currentFile ? currentFile.size : 0;
+  const isLarge = fileSize > 200 * 1024 * 1024 || video.videoWidth >= 3840;
+  const scale = isLarge ? 0.5 : 1;
   const tw = Math.round(H * aspect);
-  const count = Math.max(6, Math.round(W / tw));
+  const cw = Math.max(1, Math.round(tw * scale));
+  const ch = Math.max(1, Math.round(H * scale));
+
+  // Limit count for large files to avoid freezing
+  const rawCount = Math.max(6, Math.round(W / tw));
+  const count = isLarge ? Math.min(rawCount, 8) : rawCount;
 
   for (let i = 0; i < count; i++) {
+    if (thumbGenId !== myId) return; // cancelled by new load
     try {
       await seekExact((i / count) * duration);
+      if (thumbGenId !== myId) return;
       const c = document.createElement('canvas');
-      c.width = tw; c.height = H;
-      c.getContext('2d').drawImage(video, 0, 0, tw, H);
+      c.width = cw; c.height = ch;
+      c.getContext('2d').drawImage(video, 0, 0, cw, ch);
       c.style.cssText = `width:${tw}px;height:${H}px;flex-shrink:0;`;
       thumbCanvasStrip.appendChild(c);
+      thumbStatus.textContent = `縮圖 ${i + 1}/${count}`;
     } catch(e) {
       // Skip this frame if seek fails
     }
+    // yield to browser to keep UI responsive
+    await new Promise(r => setTimeout(r, 0));
   }
 
+  if (thumbGenId !== myId) return;
   thumbStatus.style.display = 'none';
   try { await seekExact(0); } catch(e) {}
   updateUI();
