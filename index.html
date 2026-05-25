@@ -1217,8 +1217,8 @@ async function generateThumbnails() {
   thumbStatus.textContent = '背景補圖中…';
 
   const cacheCanvas = document.createElement('canvas');
-  const cw = Math.max(1, Math.round(tw * (isLarge ? 0.75 : 1)));
-  const ch = Math.max(1, Math.round(H * (isLarge ? 0.75 : 1)));
+  const cw = Math.max(1, Math.round(tw * (isLarge ? 1.0 : 1)));
+  const ch = Math.max(1, Math.round(H * (isLarge ? 1.0 : 1)));
   cacheCanvas.width = cw;
   cacheCanvas.height = ch;
   const cacheCtx = cacheCanvas.getContext('2d');
