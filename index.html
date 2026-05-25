@@ -1191,12 +1191,18 @@ async function generateThumbnails() {
 
   // Limit count for large files to avoid freezing
   const rawCount = Math.max(6, Math.round(W / tw));
-  const count = isLarge ? Math.min(rawCount, 20) : rawCount;
+  const count = isLarge ? Math.min(rawCount, 13) : rawCount;
+
+  // For large files, skip first 2 positions that tend to be black frames
+  // by starting offset slightly into the video
+  const startOffset = isLarge ? Math.max(1, duration * 0.01) : 0;
+  const usableDuration = duration - startOffset;
 
   for (let i = 0; i < count; i++) {
     if (thumbGenId !== myId) return; // cancelled by new load
     try {
-      await seekExact((i / count) * duration);
+      const t = startOffset + (i / count) * usableDuration;
+      await seekExact(t);
       if (thumbGenId !== myId) return;
       const c = document.createElement('canvas');
       c.width = cw; c.height = ch;
