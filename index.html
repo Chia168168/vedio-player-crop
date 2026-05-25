@@ -1217,12 +1217,13 @@ async function generateThumbnails() {
   thumbStatus.textContent = '背景補圖中…';
 
   const cacheCanvas = document.createElement('canvas');
-  const cw = Math.max(1, Math.round(tw * (isLarge ? 0.5 : 1)));
-  const ch = Math.max(1, Math.round(H * (isLarge ? 0.5 : 1)));
+  const cw = Math.max(1, Math.round(tw * (isLarge ? 0.75 : 1)));
+  const ch = Math.max(1, Math.round(H * (isLarge ? 0.75 : 1)));
   cacheCanvas.width = cw;
   cacheCanvas.height = ch;
   const cacheCtx = cacheCanvas.getContext('2d');
   cacheCtx.imageSmoothingEnabled = true;
+  if ('imageSmoothingQuality' in cacheCtx) cacheCtx.imageSmoothingQuality = 'high';
 
   let i = 0;
   async function fillNext() {
@@ -1242,6 +1243,8 @@ async function generateThumbnails() {
       const c = thumbCanvasStrip.children[i];
       if (c) {
         const ctx = c.getContext('2d');
+        ctx.imageSmoothingEnabled = true;
+        if ('imageSmoothingQuality' in ctx) ctx.imageSmoothingQuality = 'high';
         ctx.clearRect(0, 0, tw, H);
         ctx.drawImage(cacheCanvas, 0, 0, tw, H);
       }
