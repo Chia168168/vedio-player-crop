@@ -1184,7 +1184,7 @@ async function generateThumbnails() {
   }
 
   const W = thumbnailStrip.offsetWidth || 320;
-  const H = thumbnailStrip.offsetHeight || 50;
+  const H = thumbnailStrip.offsetHeight || 25;
   const vw = video.videoWidth || 16;
   const vh = video.videoHeight || 9;
   const aspect = vw / vh;
@@ -1193,10 +1193,10 @@ async function generateThumbnails() {
   const fileSize = currentFile ? currentFile.size : 0;
   const isLarge = fileSize > 1000 * 1024 * 1024 || video.videoWidth >= 3840;
   const scale = isLarge ? 0.5 : 1;
-  // Display: tw = natural aspect-ratio width, H = full strip height (already halved in CSS)
+  // Display: tw = natural aspect-ratio width, H = full strip height (25px from CSS)
   const tw = Math.round(H * aspect);
-  const cw = Math.max(1, Math.round(tw * scale));  // canvas backing width
-  const ch = Math.max(1, Math.round(H * scale));   // canvas backing height
+  const cw = Math.max(1, Math.round(tw * scale));  // canvas backing width 同比例縮放
+  const ch = Math.max(1, Math.round(H * scale));   // canvas backing height 同比例縮放
   // Auto count: fill strip width with natural-width thumbs
   const count = Math.max(6, Math.round(W / tw));
 
@@ -1221,7 +1221,7 @@ async function generateThumbnails() {
         c = await drawThumb(retryT);
       }
 
-      // 小檔：canvas全尺寸，顯示寬=tw(充滿)，高=H/2 → 銳利；大檔：canvas縮半，顯示同樣 → 省記憶體
+      // 大小檔顯示方式一樣：寬=等比例tw，高=strip全高；大檔canvas縮半省記憶體
       c.style.cssText = `width:${tw}px;height:${H}px;flex-shrink:0;`;
       thumbCanvasStrip.appendChild(c);
       thumbStatus.textContent = `縮圖 ${i + 1}/${count}`;
