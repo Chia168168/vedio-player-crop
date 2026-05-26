@@ -943,16 +943,23 @@ function onMetaLoaded() {
     document.querySelectorAll('.fps-btn').forEach(b => {
       b.classList.toggle('active', parseFloat(b.dataset.fps) === fps);
     });
-    thumbStatus.style.display = 'none';
     updateUI();
-    if (skipThumbOnLoad) skipThumbOnLoad = false;
+    if (skipThumbOnLoad) {
+      skipThumbOnLoad = false;
+      thumbStatus.style.display = 'none';
+      return;
+    }
+    generateThumbnails();
     return;
   }
 
   if (item && item.fpsPromise) {
-    thumbStatus.style.display = 'none';
+    thumbStatus.textContent = '載入中…';
+    thumbStatus.style.display = 'block';
     item.fpsPromise.then(() => {
-      if (currentIndex >= 0 && playlist[currentIndex] === item) onMetaLoaded();
+      if (currentIndex >= 0 && playlist[currentIndex] === item) {
+        onMetaLoaded();
+      }
     });
     return;
   }
