@@ -851,6 +851,17 @@ changeInput.accept = 'video/*';
 changeInput.style.display = 'none';
 document.body.appendChild(changeInput);
 
+async function startQueuedItem(i) {
+  const item = playlist[i];
+  if (!item) return;
+  currentIndex = i;
+  skipThumbOnLoad = false;
+  queuePlayback = true;
+  if (typeof item.fps === 'number') showToast(`佇列 FPS (${item.fps}fps)`);
+  loadVideoFile(item.file);
+  renderPlaylist();
+}
+
 async function addFileToQueue(f) {
   const item = { file: f, name: f.name, fps: null, fpsPromise: null };
   playlist.push(item);
@@ -978,34 +989,34 @@ function onMetaLoaded() {
   duration = video.duration;
   totalTimeLabel.textContent = formatTime(duration);
   updateLoopOverlay();
-  if (skipFpsAndThumb) {
-    skipFpsAndThumb = false;
-    currentSpeed = autoNextSpeed;
-    fps = autoNextFps;
+
+  const item = playlist[currentIndex] || null;
+  if (item && typeof item.fps === 'number') {
+    fps = item.fps;
     fpsDetected = true;
-    video.playbackRate = currentSpeed;
-    setTimeout(() => { video.playbackRate = currentSpeed; }, 0);
-    document.querySelectorAll('.speed-btn').forEach(b => {
-      b.classList.toggle('active', parseFloat(b.dataset.speed) === currentSpeed);
-    });
-    document.querySelectorAll('.fps-btn').forEach(b => {
-      b.classList.toggle('active', parseFloat(b.dataset.fps) === fps);
-    });
-    thumbStatus.style.display = 'none';
-    updateUI();
+    loadedVideoFps = fps;
+    showToast(`佇列 FPS (${fps}fps)`);
+  } else {
+    fpsDetected = true;
+    fps = loadedVideoFps || 30;
+  }
+
+  currentSpeed = autoNextSpeed;
+  video.playbackRate = currentSpeed;
+  setTimeout(() => { video.playbackRate = currentSpeed; }, 0);
+  document.querySelectorAll('.fps-btn').forEach(b => {
+    b.classList.toggle('active', parseFloat(b.dataset.fps) === fps);
+  });
+  document.querySelectorAll('.speed-btn').forEach(b => {
+    b.classList.toggle('active', parseFloat(b.dataset.speed) === currentSpeed);
+  });
+  updateUI();
+  if (skipThumbOnLoad) {
     skipThumbOnLoad = false;
+    thumbStatus.style.display = 'none';
     return;
   }
-  fpsDetected = false;
-  fps = 30;
-  thumbStatus.textContent = '偵測 fps 中…';
-  thumbStatus.style.display = 'block';
-  updateUI();
-  detectFPS().then(() => {
-    updateUI();
-    if (skipThumbOnLoad) { skipThumbOnLoad = false; thumbStatus.style.display = 'none'; }
-    else { generateThumbnails(); }
-  });
+  generateThumbnails();
 }
 
 // ── Video error handling ──
@@ -2519,12 +2530,7 @@ function renderPlaylist() {
     });
     li.addEventListener('click', ev => {
       ev.stopPropagation();
-      currentIndex = i;
-      skipThumbOnLoad = false;
-      const item = playlist[i];
-      if (item && typeof item.fps === 'number') showToast(`佇列 FPS (${item.fps}fps)`);
-      loadVideoFile(item.file);
-      renderPlaylist();
+      startQueuedItem(i);
     });
     _playlistList.appendChild(li);
   });
