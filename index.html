@@ -964,14 +964,12 @@ video.addEventListener('error', () => {
 let currentLoadFpsPromise = Promise.resolve();
 async function preDetectQueueFps(item) {
   try {
-    queueFpsLoading = true;
     const result = await parseFPS(item.file);
     item.fps = (result && result > 1 && result <= 300) ? snapToCommonFPS(result) : 30;
   } catch(e) {
     item.fps = 30;
-  } finally {
-    queueFpsLoading = false;
   }
+  return item.fps;
 }
 
 let currentFile = null;
