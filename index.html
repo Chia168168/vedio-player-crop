@@ -662,6 +662,7 @@ let fpsDetected = false;
 let autoNextFps = 30;
 let autoNextSpeed = 1;
 let loadedVideoFps = 30;
+let skipLoadFpsDetect = false;
 let duration = 0;
 let isPlaying = false;
 let currentSpeed = 1;
@@ -851,7 +852,8 @@ fileInput.addEventListener('change', e => {
   const f = e.target.files && e.target.files[0];
   if (!f) return;
   fileInput.value = '';
-  playlist.push({ file: f, name: f.name });
+  playlist.push({ file: f, name: f.name, fps: null });
+  preDetectQueueFps(playlist[playlist.length - 1]);
   if (currentIndex === -1) { currentIndex = 0; loadVideoFile(f); }
   else { renderPlaylist(); showToast('已加入佇列 (' + playlist.length + ')'); }
 });
@@ -860,7 +862,8 @@ changeInput.addEventListener('change', e => {
   const f = e.target.files && e.target.files[0];
   if (!f) return;
   changeInput.value = '';
-  playlist.push({ file: f, name: f.name });
+  playlist.push({ file: f, name: f.name, fps: null });
+  preDetectQueueFps(playlist[playlist.length - 1]);
   if (currentIndex === -1) { currentIndex = 0; loadVideoFile(f); }
   else { renderPlaylist(); showToast('已加入佇列 (' + playlist.length + ')'); }
 });
@@ -868,6 +871,16 @@ changeInput.addEventListener('change', e => {
 document.getElementById('change-video-btn').addEventListener('click', e => {
   e.stopPropagation(); changeInput.click();
 });
+
+async function preDetectQueueFps(item) {
+  try {
+    const result = await parseFPS(item.file);
+    if (result && result > 1 && result <= 300) item.fps = snapToCommonFPS(result);
+    else item.fps = 30;
+  } catch(e) {
+    item.fps = 30;
+  }
+}
 
 function loadVideoFile(file) {
   stopFrameMode();
@@ -960,12 +973,27 @@ function onMetaLoaded() {
   updateLoopOverlay();
   currentSpeed = autoNextSpeed;
   video.playbackRate = currentSpeed;
+  if (skipLoadFpsDetect) {
+    const item = playlist[currentIndex];
+    fps = (item && item.fps) ? item.fps : loadedVideoFps;
+    loadedVideoFps = fps;
+    fpsDetected = true;
+    document.querySelectorAll('.fps-btn').forEach(b => {
+      b.classList.toggle('active', parseFloat(b.dataset.fps) === fps);
+    });
+    thumbStatus.style.display = 'none';
+    updateUI();
+    if (skipThumbOnLoad) { skipThumbOnLoad = false; }
+    skipLoadFpsDetect = false;
+    return;
+  }
   fpsDetected = false;
   fps = 30;
   thumbStatus.textContent = '偵測 fps 中…';
   thumbStatus.style.display = 'block';
   updateUI();
   detectFPS().then(() => {
+    loadedVideoFps = fps;
     updateUI();
     if (skipThumbOnLoad) { skipThumbOnLoad = false; thumbStatus.style.display = 'none'; }
     else { generateThumbnails(); }
