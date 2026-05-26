@@ -661,6 +661,7 @@ let fps = 30;       // will be updated after detection
 let fpsDetected = false;
 let autoNextFps = 30;
 let autoNextSpeed = 1;
+let loadedVideoFps = 30;
 let duration = 0;
 let isPlaying = false;
 let currentSpeed = 1;
@@ -882,6 +883,7 @@ function loadVideoFile(file) {
     document.querySelector('.speed-btn[data-speed="1"]').classList.add('active');
     currentSpeed = 1; video.playbackRate = 1;
     fps = 30; fpsDetected = false;
+    loadedVideoFps = 30;
     autoNextFps = 30;
     autoNextSpeed = 1;
     document.querySelectorAll('.fps-btn').forEach(b => {
@@ -1002,6 +1004,7 @@ let currentFile = null;
 // ── FPS manual buttons ──
 function setFps(value) {
   fps = value;
+  loadedVideoFps = value;
   fpsDetected = true;
   document.querySelectorAll('.fps-btn').forEach(b => {
     b.classList.toggle('active', parseFloat(b.dataset.fps) === value);
@@ -1026,7 +1029,7 @@ function detectFPS() {
       const result = await parseFPS(currentFile);
       if (result && result > 1 && result <= 300) {
         setFps(snapToCommonFPS(result));
-        if (!skipFpsAndThumb) autoNextFps = fps;
+        autoNextFps = loadedVideoFps;
         showToast(`自動偵測 ${fps} fps`);
       } else {
         showToast('無法偵測，請手動選 FPS');
@@ -1342,7 +1345,7 @@ video.addEventListener('ended', () => {
     skipThumbOnLoad = true;
     skipFpsAndThumb = true;
     autoNextSpeed = currentSpeed;
-    autoNextFps = fps;
+    autoNextFps = loadedVideoFps;
     loadVideoFile(playlist[currentIndex].file);
     renderPlaylist();
     video.addEventListener('canplay', function ap() {
