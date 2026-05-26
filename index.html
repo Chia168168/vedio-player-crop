@@ -930,20 +930,42 @@ function onMetaLoaded() {
     return;
   }
   duration = video.duration;
+  totalTimeLabel.textContent = formatTime(duration);
+  updateLoopOverlay();
+  currentSpeed = autoNextSpeed;
+  video.playbackRate = currentSpeed;
+
+  const item = playlist[currentIndex] || null;
+  if (item && typeof item.fps === 'number') {
+    fps = item.fps;
+    fpsDetected = true;
+    loadedVideoFps = fps;
+    document.querySelectorAll('.fps-btn').forEach(b => {
+      b.classList.toggle('active', parseFloat(b.dataset.fps) === fps);
+    });
+    thumbStatus.style.display = 'none';
+    updateUI();
+    if (skipThumbOnLoad) skipThumbOnLoad = false;
+    return;
+  }
+
+  if (item && item.fpsPromise) {
+    thumbStatus.style.display = 'none';
+    item.fpsPromise.then(() => {
+      if (currentIndex >= 0 && playlist[currentIndex] === item) onMetaLoaded();
+    });
+    return;
+  }
+
+  // First file fallback only
   fpsDetected = false;
   fps = 30;
-  totalTimeLabel.textContent = formatTime(duration);
   thumbStatus.textContent = '偵測 fps 中…';
   thumbStatus.style.display = 'block';
   updateUI();
-  updateLoopOverlay();
-  if (skipFpsAndThumb) {
-    skipFpsAndThumb = false;
-    thumbStatus.style.display = 'none';
-    updateUI();
-    return;
-  }
   detectFPS().then(() => {
+    loadedVideoFps = fps;
+    if (item) item.fps = fps;
     updateUI();
     if (skipThumbOnLoad) { skipThumbOnLoad = false; thumbStatus.style.display = 'none'; }
     else { generateThumbnails(); }
@@ -1255,7 +1277,7 @@ video.addEventListener('ended', () => {
   if (autoPlayNext && currentIndex >= 0 && currentIndex + 1 < playlist.length) {
     currentIndex++;
     skipThumbOnLoad = true;
-    skipFpsAndThumb = true;
+    skipFpsAndThumb = false;
     loadVideoFile(playlist[currentIndex].file);
     renderPlaylist();
     video.addEventListener('canplay', function ap() {
