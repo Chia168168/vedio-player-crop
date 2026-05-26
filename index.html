@@ -308,7 +308,7 @@
     transition: width 0.08s linear;
   }
   #thumbnail-strip {
-    position: relative; height: 40px;
+    position: relative; height: 50px;
     border-radius: 8px; overflow: hidden;
     background: rgba(255,255,255,0.05);
     border: 1px solid rgba(255,255,255,0.08);
@@ -331,11 +331,8 @@
     background: var(--accent); border-radius: 50%;
   }
   .thumb-loading {
-    position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%);
-    color: rgba(255,255,255,0.7); font-size: 11px;
-    font-family: 'DM Mono', monospace; text-align: center;
-    background: rgba(0,0,0,0.45); padding: 2px 8px; border-radius: 4px;
-    pointer-events: none; z-index: 10; white-space: nowrap;
+    color: var(--muted); font-size: 11px;
+    font-family: 'DM Mono', monospace; text-align: center; padding: 8px 0 0;
   }
 
   /* Loop range */
@@ -595,9 +592,8 @@ if ('serviceWorker' in navigator) {
         <div id="thumb-canvas-strip"></div>
         <div id="loop-range-overlay"></div>
         <div id="timeline-indicator"></div>
-        <div id="thumb-status" class="thumb-loading" style="display:none;"></div>
       </div>
-      
+      <div id="thumb-status" class="thumb-loading">生成縮圖中…</div>
     </div>
 
     <div id="loop-row">
@@ -656,14 +652,10 @@ const timeOverlay       = document.getElementById('time-overlay');
 
 let playlist=[]; let currentIndex=-1; let autoPlayNext=true; let skipThumbOnLoad=false;
 let skipFpsAndThumb=false;
-// 連播：沿用第一支影片的 FPS / 速度；後續影片不產生縮圖
 let fps = 30;       // will be updated after detection
 let fpsDetected = false;
-let autoNextFps = 30;
-let autoNextSpeed = 1;
-let loadedVideoFps = 30;
-let skipLoadFpsDetect = false;
 let duration = 0;
+let queueFpsLoading = false;
 let isPlaying = false;
 let currentSpeed = 1;
 let frameMode = false;
@@ -872,16 +864,6 @@ document.getElementById('change-video-btn').addEventListener('click', e => {
   e.stopPropagation(); changeInput.click();
 });
 
-async function preDetectQueueFps(item) {
-  try {
-    const result = await parseFPS(item.file);
-    if (result && result > 1 && result <= 300) item.fps = snapToCommonFPS(result);
-    else item.fps = 30;
-  } catch(e) {
-    item.fps = 30;
-  }
-}
-
 function loadVideoFile(file) {
   stopFrameMode();
   video.pause();
@@ -891,27 +873,16 @@ function loadVideoFile(file) {
   thumbStatus.textContent = '載入中…';
   thumbStatus.style.display = 'block';
 
-  if (!skipFpsAndThumb) {
+  const queued = playlist[currentIndex] && playlist[currentIndex].file === file ? playlist[currentIndex] : null;
+  const canUseQueuedFps = queued && queued.fps && queueFpsLoading === false;
+
+  if (!skipFpsAndThumb && !canUseQueuedFps) {
     document.querySelectorAll('.speed-btn').forEach(b => b.classList.remove('active'));
     document.querySelector('.speed-btn[data-speed="1"]').classList.add('active');
     currentSpeed = 1; video.playbackRate = 1;
     fps = 30; fpsDetected = false;
-    loadedVideoFps = 30;
-    autoNextFps = 30;
-    autoNextSpeed = 1;
     document.querySelectorAll('.fps-btn').forEach(b => {
       b.classList.toggle('active', b.dataset.fps === '30');
-    });
-  } else {
-    currentSpeed = autoNextSpeed;
-    video.playbackRate = currentSpeed;
-    fps = autoNextFps;
-    fpsDetected = true;
-    document.querySelectorAll('.speed-btn').forEach(b => {
-      b.classList.toggle('active', parseFloat(b.dataset.speed) === currentSpeed);
-    });
-    document.querySelectorAll('.fps-btn').forEach(b => {
-      b.classList.toggle('active', parseFloat(b.dataset.fps) === fps);
     });
   }
   resetLoop();
@@ -969,31 +940,20 @@ function onMetaLoaded() {
     return;
   }
   duration = video.duration;
-  totalTimeLabel.textContent = formatTime(duration);
-  updateLoopOverlay();
-  currentSpeed = autoNextSpeed;
-  video.playbackRate = currentSpeed;
-  if (skipLoadFpsDetect) {
-    const item = playlist[currentIndex];
-    fps = (item && item.fps) ? item.fps : loadedVideoFps;
-    loadedVideoFps = fps;
-    fpsDetected = true;
-    document.querySelectorAll('.fps-btn').forEach(b => {
-      b.classList.toggle('active', parseFloat(b.dataset.fps) === fps);
-    });
-    thumbStatus.style.display = 'none';
-    updateUI();
-    if (skipThumbOnLoad) { skipThumbOnLoad = false; }
-    skipLoadFpsDetect = false;
-    return;
-  }
   fpsDetected = false;
   fps = 30;
+  totalTimeLabel.textContent = formatTime(duration);
   thumbStatus.textContent = '偵測 fps 中…';
   thumbStatus.style.display = 'block';
   updateUI();
+  updateLoopOverlay();
+  if (skipFpsAndThumb) {
+    skipFpsAndThumb = false;
+    thumbStatus.style.display = 'none';
+    updateUI();
+    return;
+  }
   detectFPS().then(() => {
-    loadedVideoFps = fps;
     updateUI();
     if (skipThumbOnLoad) { skipThumbOnLoad = false; thumbStatus.style.display = 'none'; }
     else { generateThumbnails(); }
@@ -1011,12 +971,24 @@ video.addEventListener('error', () => {
 });
 
 // ── FPS Detection via mp4box.js ──
+let currentLoadFpsPromise = Promise.resolve();
+async function preDetectQueueFps(item) {
+  try {
+    queueFpsLoading = true;
+    const result = await parseFPS(item.file);
+    item.fps = (result && result > 1 && result <= 300) ? snapToCommonFPS(result) : 30;
+  } catch(e) {
+    item.fps = 30;
+  } finally {
+    queueFpsLoading = false;
+  }
+}
+
 let currentFile = null;
 
 // ── FPS manual buttons ──
 function setFps(value) {
   fps = value;
-  loadedVideoFps = value;
   fpsDetected = true;
   document.querySelectorAll('.fps-btn').forEach(b => {
     b.classList.toggle('active', parseFloat(b.dataset.fps) === value);
@@ -1041,7 +1013,6 @@ function detectFPS() {
       const result = await parseFPS(currentFile);
       if (result && result > 1 && result <= 300) {
         setFps(snapToCommonFPS(result));
-        autoNextFps = loadedVideoFps;
         showToast(`自動偵測 ${fps} fps`);
       } else {
         showToast('無法偵測，請手動選 FPS');
@@ -1210,98 +1181,40 @@ function seekExact(t) {
 }
 
 // ── Thumbnails ──
-let thumbGenId = 0; // increment to cancel in-flight generation
-
-async function drawThumb(seekT, cw, ch) {
-  await seekExact(seekT);
-  const c = document.createElement('canvas');
-  c.width = cw; c.height = ch;
-  c.getContext('2d').drawImage(video, 0, 0, cw, ch);
-  return c;
-}
-
 async function generateThumbnails() {
-  const myId = ++thumbGenId;
   thumbCanvasStrip.innerHTML = '';
   thumbStatus.style.display = 'block';
-  thumbStatus.textContent = '縮圖 初始化…';
-  await new Promise(r => setTimeout(r, 0));
+  thumbStatus.textContent = '生成縮圖中…';
+  await new Promise(r => setTimeout(r, 100));
 
   if (!video.videoWidth || !video.duration) {
     thumbStatus.style.display = 'none'; return;
   }
 
   const W = thumbnailStrip.offsetWidth || 320;
-  const H = thumbnailStrip.offsetHeight || 40;
+  const H = thumbnailStrip.offsetHeight || 50;
   const vw = video.videoWidth || 16;
   const vh = video.videoHeight || 9;
   const aspect = vw / vh;
-  const fileSize = currentFile ? currentFile.size : 0;
-  const isLarge = fileSize > 1000 * 1024 * 1024 || video.videoWidth >= 3840;
   const tw = Math.round(H * aspect);
-  const baseCount = Math.max(6, Math.round(W / tw));
-  const count = baseCount;
-  const startOffset = Math.max(0.5, duration * 0.01);
-  const usableDuration = duration - startOffset;
-  const step = usableDuration / count;
-
-  const placeholder = document.createElement('canvas');
-  placeholder.width = 8;
-  placeholder.height = 8;
-  const pctx = placeholder.getContext('2d');
-  const gradient = pctx.createLinearGradient(0, 0, 8, 8);
-  gradient.addColorStop(0, 'rgba(255,255,255,0.10)');
-  gradient.addColorStop(1, 'rgba(255,255,255,0.04)');
-  pctx.fillStyle = gradient;
-  pctx.fillRect(0, 0, 8, 8);
+  const count = Math.max(6, Math.round(W / tw));
 
   for (let i = 0; i < count; i++) {
-    const c = document.createElement('canvas');
-    c.width = tw; c.height = H;
-    c.getContext('2d').drawImage(placeholder, 0, 0, tw, H);
-    c.style.cssText = `width:${tw}px;height:${H}px;flex-shrink:0;`;
-    thumbCanvasStrip.appendChild(c);
-  }
-  thumbStatus.textContent = '縮圖 載入中…';
-
-  const cacheCanvas = document.createElement('canvas');
-  const cw = Math.max(1, Math.round(tw * (isLarge ? 1.0 : 1)));
-  const ch = Math.max(1, Math.round(H * (isLarge ? 1.0 : 1)));
-  cacheCanvas.width = cw;
-  cacheCanvas.height = ch;
-  const cacheCtx = cacheCanvas.getContext('2d');
-  cacheCtx.imageSmoothingEnabled = true;
-  if ('imageSmoothingQuality' in cacheCtx) cacheCtx.imageSmoothingQuality = 'high';
-
-  let i = 0;
-  async function fillNext() {
-    if (thumbGenId !== myId) return;
-    if (i >= count) {
-      thumbStatus.style.display = 'none';
-      try { await seekExact(0); } catch(e) {}
-      updateUI();
-      return;
-    }
     try {
-      const t = startOffset + i * step;
-      await seekExact(t);
-      if (thumbGenId !== myId) return;
-      cacheCtx.clearRect(0, 0, cw, ch);
-      cacheCtx.drawImage(video, 0, 0, cw, ch);
-      const c = thumbCanvasStrip.children[i];
-      if (c) {
-        const ctx = c.getContext('2d');
-        ctx.imageSmoothingEnabled = true;
-        if ('imageSmoothingQuality' in ctx) ctx.imageSmoothingQuality = 'high';
-        ctx.clearRect(0, 0, tw, H);
-        ctx.drawImage(cacheCanvas, 0, 0, tw, H);
-      }
-      thumbStatus.textContent = `縮圖 ${i + 1}/${count}`;
-    } catch(e) {}
-    i++;
-    setTimeout(fillNext, isLarge ? 30 : 0);
+      await seekExact((i / count) * duration);
+      const c = document.createElement('canvas');
+      c.width = tw; c.height = H;
+      c.getContext('2d').drawImage(video, 0, 0, tw, H);
+      c.style.cssText = `width:${tw}px;height:${H}px;flex-shrink:0;`;
+      thumbCanvasStrip.appendChild(c);
+    } catch(e) {
+      // Skip this frame if seek fails
+    }
   }
-  fillNext();
+
+  thumbStatus.style.display = 'none';
+  try { await seekExact(0); } catch(e) {}
+  updateUI();
 }
 
 // ── Play / Pause ──
@@ -1353,11 +1266,8 @@ video.addEventListener('ended', () => {
   stopFrameMode(); clearTimeout(autoHideTimer);
   if (autoPlayNext && currentIndex >= 0 && currentIndex + 1 < playlist.length) {
     currentIndex++;
-    // 連播：保留上一支影片的 FPS / 速度，只跳過縮圖
     skipThumbOnLoad = true;
     skipFpsAndThumb = true;
-    autoNextSpeed = currentSpeed;
-    autoNextFps = loadedVideoFps;
     loadVideoFile(playlist[currentIndex].file);
     renderPlaylist();
     video.addEventListener('canplay', function ap() {
