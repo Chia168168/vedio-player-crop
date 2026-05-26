@@ -470,7 +470,7 @@ if ('serviceWorker' in navigator) {
 
 <!-- Upload -->
 <div id="upload-screen">
-  <div class="logo">TENG 影片播放器</div>
+  <div class="logo">TENG 影片播放器 V</div>
   <div class="upload-zone">
     <input type="file" id="file-input" accept="video/*">
     <div class="upload-icon">
@@ -656,8 +656,11 @@ const timeOverlay       = document.getElementById('time-overlay');
 
 let playlist=[]; let currentIndex=-1; let autoPlayNext=true; let skipThumbOnLoad=false;
 let skipFpsAndThumb=false;
+// 連播：沿用第一支影片的 FPS / 速度；後續影片不產生縮圖
 let fps = 30;       // will be updated after detection
 let fpsDetected = false;
+let autoNextFps = 30;
+let autoNextSpeed = 1;
 let duration = 0;
 let isPlaying = false;
 let currentSpeed = 1;
@@ -879,8 +882,21 @@ function loadVideoFile(file) {
     document.querySelector('.speed-btn[data-speed="1"]').classList.add('active');
     currentSpeed = 1; video.playbackRate = 1;
     fps = 30; fpsDetected = false;
+    autoNextFps = 30;
+    autoNextSpeed = 1;
     document.querySelectorAll('.fps-btn').forEach(b => {
       b.classList.toggle('active', b.dataset.fps === '30');
+    });
+  } else {
+    currentSpeed = autoNextSpeed;
+    video.playbackRate = currentSpeed;
+    fps = autoNextFps;
+    fpsDetected = true;
+    document.querySelectorAll('.speed-btn').forEach(b => {
+      b.classList.toggle('active', parseFloat(b.dataset.speed) === currentSpeed);
+    });
+    document.querySelectorAll('.fps-btn').forEach(b => {
+      b.classList.toggle('active', parseFloat(b.dataset.fps) === fps);
     });
   }
   resetLoop();
@@ -941,12 +957,11 @@ function onMetaLoaded() {
   totalTimeLabel.textContent = formatTime(duration);
   updateLoopOverlay();
   if (skipFpsAndThumb) {
-    // 連播：沿用上一支影片的 fps 及播放速度
     skipFpsAndThumb = false;
     thumbStatus.style.display = 'none';
-    video.playbackRate = (currentSpeed === 'frame' ? 1 : currentSpeed);
     updateUI();
-    generateThumbnails();
+    if (!skipThumbOnLoad) generateThumbnails();
+    else skipThumbOnLoad = false;
     return;
   }
   fpsDetected = false;
@@ -1001,6 +1016,7 @@ function detectFPS() {
       const result = await parseFPS(currentFile);
       if (result && result > 1 && result <= 300) {
         setFps(snapToCommonFPS(result));
+        if (!skipFpsAndThumb) autoNextFps = fps;
         showToast(`自動偵測 ${fps} fps`);
       } else {
         showToast('無法偵測，請手動選 FPS');
@@ -1312,8 +1328,9 @@ video.addEventListener('ended', () => {
   stopFrameMode(); clearTimeout(autoHideTimer);
   if (autoPlayNext && currentIndex >= 0 && currentIndex + 1 < playlist.length) {
     currentIndex++;
+    // 連播：保留上一支影片的 FPS / 速度，只跳過縮圖
     skipThumbOnLoad = true;
-    skipFpsAndThumb = true;
+    skipFpsAndThumb = false;
     loadVideoFile(playlist[currentIndex].file);
     renderPlaylist();
     video.addEventListener('canplay', function ap() {
