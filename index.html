@@ -682,6 +682,11 @@ function showToast(msg) {
   t.classList.add('show');
   setTimeout(() => t.classList.remove('show'), 2200);
 }
+function showQueueSavedToast(label, fpsText) {
+  showToast(`已加入佇列 (${label})`);
+  setTimeout(() => showToast(`已儲存佇列 FPS (${fpsText})`), 120);
+}
+
 function updateUI() {
   const ct = video.currentTime;
   const frame = Math.round(ct * fps);
@@ -846,22 +851,38 @@ changeInput.accept = 'video/*';
 changeInput.style.display = 'none';
 document.body.appendChild(changeInput);
 
-fileInput.addEventListener('change', e => {
+async function addFileToQueue(f) {
+  const item = { file: f, name: f.name, fps: null, fpsPromise: null };
+  playlist.push(item);
+  renderPlaylist();
+  showToast('已加入佇列 (' + playlist.length + ')');
+  item.fpsPromise = (async () => {
+    try {
+      const result = await parseFPS(item.file);
+      item.fps = (result && result > 1 && result <= 300) ? snapToCommonFPS(result) : 30;
+    } catch(e) {
+      item.fps = 30;
+    }
+    showQueueSavedToast(playlist.length, item.fps + 'fps');
+    return item.fps;
+  })();
+  return item;
+}
+
+fileInput.addEventListener('change', async e => {
   const f = e.target.files && e.target.files[0];
   if (!f) return;
   fileInput.value = '';
-  playlist.push({ file: f, name: f.name });
+  const item = await addFileToQueue(f);
   if (currentIndex === -1) { currentIndex = 0; loadVideoFile(f); }
-  else { renderPlaylist(); showToast('已加入佇列 (' + playlist.length + ')'); }
 });
 
-changeInput.addEventListener('change', e => {
+changeInput.addEventListener('change', async e => {
   const f = e.target.files && e.target.files[0];
   if (!f) return;
   changeInput.value = '';
-  playlist.push({ file: f, name: f.name });
+  const item = await addFileToQueue(f);
   if (currentIndex === -1) { currentIndex = 0; loadVideoFile(f); }
-  else { renderPlaylist(); showToast('已加入佇列 (' + playlist.length + ')'); }
 });
 
 document.getElementById('change-video-btn').addEventListener('click', e => {
