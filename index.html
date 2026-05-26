@@ -2519,8 +2519,15 @@ function renderPlaylist() {
       ev.stopPropagation();
       currentIndex = i;
       skipThumbOnLoad = false;
-      loadVideoFile(playlist[i].file);
-      renderPlaylist();
+      const item = playlist[i];
+      const startLoad = () => {
+        showToast(`佇列 FPS (${item.fps || 30}fps)`);
+        queuePlayback = true;
+        loadVideoFile(item.file);
+        renderPlaylist();
+      };
+      if (item && item.fpsPromise) item.fpsPromise.finally(startLoad);
+      else startLoad();
     });
     _playlistList.appendChild(li);
   });
