@@ -863,6 +863,7 @@ async function addFileToQueue(f) {
     } catch(e) {
       item.fps = 30;
     }
+    renderPlaylist();
     showQueueSavedToast(playlist.length, item.fps + 'fps');
     return item.fps;
   })();
@@ -2505,9 +2506,10 @@ function renderPlaylist() {
   playlist.forEach((item, i) => {
     const li = document.createElement('li');
     li.className = 'pl-item' + (i === currentIndex ? ' current' : '');
+    const fpsLabel = (typeof item.fps === 'number') ? ` <span class="pl-fps">(${item.fps}fps)</span>` : '';
     li.innerHTML =
       '<span class="pl-idx">' + (i+1) + '</span>' +
-      '<span class="pl-name">' + item.name + '</span>' +
+      '<span class="pl-name">' + item.name + fpsLabel + '</span>' +
       '<span class="pl-del">✕</span>';
     li.querySelector('.pl-del').addEventListener('click', ev => {
       ev.stopPropagation();
@@ -2520,14 +2522,9 @@ function renderPlaylist() {
       currentIndex = i;
       skipThumbOnLoad = false;
       const item = playlist[i];
-      const startLoad = () => {
-        queuePlayback = true;
-        if (item && typeof item.fps === 'number') showToast(`佇列 FPS (${item.fps}fps)`);
-        loadVideoFile(item.file);
-        renderPlaylist();
-      };
-      if (item && item.fpsPromise) item.fpsPromise.finally(startLoad);
-      else startLoad();
+      if (item && typeof item.fps === 'number') showToast(`佇列 FPS (${item.fps}fps)`);
+      loadVideoFile(item.file);
+      renderPlaylist();
     });
     _playlistList.appendChild(li);
   });
