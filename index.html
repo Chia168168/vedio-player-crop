@@ -2521,8 +2521,8 @@ function renderPlaylist() {
       skipThumbOnLoad = false;
       const item = playlist[i];
       const startLoad = () => {
-        showToast(`佇列 FPS (${item.fps || 30}fps)`);
         queuePlayback = true;
+        if (item && typeof item.fps === 'number') showToast(`佇列 FPS (${item.fps}fps)`);
         loadVideoFile(item.file);
         renderPlaylist();
       };
