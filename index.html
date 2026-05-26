@@ -958,24 +958,8 @@ function onMetaLoaded() {
   duration = video.duration;
   totalTimeLabel.textContent = formatTime(duration);
   updateLoopOverlay();
-  if (skipFpsAndThumb) {
-    skipFpsAndThumb = false;
-    currentSpeed = autoNextSpeed;
-    fps = autoNextFps;
-    fpsDetected = true;
-    video.playbackRate = currentSpeed;
-    setTimeout(() => { video.playbackRate = currentSpeed; }, 0);
-    document.querySelectorAll('.speed-btn').forEach(b => {
-      b.classList.toggle('active', parseFloat(b.dataset.speed) === currentSpeed);
-    });
-    document.querySelectorAll('.fps-btn').forEach(b => {
-      b.classList.toggle('active', parseFloat(b.dataset.fps) === fps);
-    });
-    thumbStatus.style.display = 'none';
-    updateUI();
-    skipThumbOnLoad = false;
-    return;
-  }
+  currentSpeed = autoNextSpeed;
+  video.playbackRate = currentSpeed;
   fpsDetected = false;
   fps = 30;
   thumbStatus.textContent = '偵測 fps 中…';
