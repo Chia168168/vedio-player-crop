@@ -470,7 +470,7 @@ if ('serviceWorker' in navigator) {
 
 <!-- Upload -->
 <div id="upload-screen">
-  <div class="logo">TENG 影片播放器</div>
+  <div class="logo">TENG 影片播放器 V18</div>
   <div class="upload-zone">
     <input type="file" id="file-input" accept="video/*">
     <div class="upload-icon">
@@ -958,10 +958,19 @@ function onMetaLoaded() {
   updateLoopOverlay();
   if (skipFpsAndThumb) {
     skipFpsAndThumb = false;
+    currentSpeed = autoNextSpeed;
+    fps = autoNextFps;
+    fpsDetected = true;
+    video.playbackRate = currentSpeed;
+    document.querySelectorAll('.speed-btn').forEach(b => {
+      b.classList.toggle('active', parseFloat(b.dataset.speed) === currentSpeed);
+    });
+    document.querySelectorAll('.fps-btn').forEach(b => {
+      b.classList.toggle('active', parseFloat(b.dataset.fps) === fps);
+    });
     thumbStatus.style.display = 'none';
     updateUI();
-    if (!skipThumbOnLoad) generateThumbnails();
-    else skipThumbOnLoad = false;
+    skipThumbOnLoad = false;
     return;
   }
   fpsDetected = false;
@@ -1330,7 +1339,7 @@ video.addEventListener('ended', () => {
     currentIndex++;
     // 連播：保留上一支影片的 FPS / 速度，只跳過縮圖
     skipThumbOnLoad = true;
-    skipFpsAndThumb = false;
+    skipFpsAndThumb = true;
     loadVideoFile(playlist[currentIndex].file);
     renderPlaylist();
     video.addEventListener('canplay', function ap() {
