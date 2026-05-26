@@ -470,7 +470,7 @@ if ('serviceWorker' in navigator) {
 
 <!-- Upload -->
 <div id="upload-screen">
-  <div class="logo">TENG 影片播放器 V18</div>
+  <div class="logo">TENG 影片播放器</div>
   <div class="upload-zone">
     <input type="file" id="file-input" accept="video/*">
     <div class="upload-icon">
@@ -875,9 +875,9 @@ function loadVideoFile(file) {
   thumbStatus.style.display = 'block';
 
   document.querySelectorAll('.speed-btn').forEach(b => b.classList.remove('active'));
-  document.querySelector('.speed-btn[data-speed="1"]').classList.add('active');
-  currentSpeed = 1; video.playbackRate = 1;
   if (!skipFpsAndThumb) {
+    document.querySelector('.speed-btn[data-speed="1"]').classList.add('active');
+    currentSpeed = 1; video.playbackRate = 1;
     fps = 30; fpsDetected = false;
     document.querySelectorAll('.fps-btn').forEach(b => {
       b.classList.toggle('active', b.dataset.fps === '30');
@@ -938,19 +938,22 @@ function onMetaLoaded() {
     return;
   }
   duration = video.duration;
+  totalTimeLabel.textContent = formatTime(duration);
+  updateLoopOverlay();
+  if (skipFpsAndThumb) {
+    // 連播：沿用上一支影片的 fps 及播放速度
+    skipFpsAndThumb = false;
+    thumbStatus.style.display = 'none';
+    video.playbackRate = (currentSpeed === 'frame' ? 1 : currentSpeed);
+    updateUI();
+    generateThumbnails();
+    return;
+  }
   fpsDetected = false;
   fps = 30;
-  totalTimeLabel.textContent = formatTime(duration);
   thumbStatus.textContent = '偵測 fps 中…';
   thumbStatus.style.display = 'block';
   updateUI();
-  updateLoopOverlay();
-  if (skipFpsAndThumb) {
-    skipFpsAndThumb = false;
-    thumbStatus.style.display = 'none';
-    updateUI();
-    return;
-  }
   detectFPS().then(() => {
     updateUI();
     if (skipThumbOnLoad) { skipThumbOnLoad = false; thumbStatus.style.display = 'none'; }
