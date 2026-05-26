@@ -470,7 +470,7 @@ if ('serviceWorker' in navigator) {
 
 <!-- Upload -->
 <div id="upload-screen">
-  <div class="logo">TENG 影片播放器 V18</div>
+  <div class="logo">TENG 影片播放器</div>
   <div class="upload-zone">
     <input type="file" id="file-input" accept="video/*">
     <div class="upload-icon">
@@ -877,8 +877,8 @@ function loadVideoFile(file) {
   thumbStatus.textContent = '載入中…';
   thumbStatus.style.display = 'block';
 
-  document.querySelectorAll('.speed-btn').forEach(b => b.classList.remove('active'));
   if (!skipFpsAndThumb) {
+    document.querySelectorAll('.speed-btn').forEach(b => b.classList.remove('active'));
     document.querySelector('.speed-btn[data-speed="1"]').classList.add('active');
     currentSpeed = 1; video.playbackRate = 1;
     fps = 30; fpsDetected = false;
