@@ -124,7 +124,7 @@
     transition: opacity 0.3s;
   }
   #time-display { color: rgba(255,255,255,0.85); }
-  #frame-display { color: rgba(255,255,255,0.5); font-size: 10px; }
+  #frame-display { color: rgba(255,255,255,0.85); font-size: 10px; }
   #time-overlay.hidden { opacity: 0; }
 
   /* ── Mini bar (visible when panel hidden) ── */
@@ -294,7 +294,7 @@
   }
   .timeline-label {
     font-size: 10px; font-family: 'DM Mono', monospace;
-    color: var(--muted); letter-spacing: 0.15em; text-transform: uppercase;
+    color: rgba(255,255,255,1); letter-spacing: 0.15em; text-transform: uppercase;
     display: flex; justify-content: space-between;
   }
   #progress-bar-wrap {
@@ -308,7 +308,7 @@
     transition: width 0.08s linear;
   }
   #thumbnail-strip {
-    position: relative; height: 50px;
+    position: relative; height: 40px;
     border-radius: 8px; overflow: hidden;
     background: rgba(255,255,255,0.05);
     border: 1px solid rgba(255,255,255,0.08);
@@ -331,8 +331,11 @@
     background: var(--accent); border-radius: 50%;
   }
   .thumb-loading {
-    color: var(--muted); font-size: 11px;
-    font-family: 'DM Mono', monospace; text-align: center; padding: 8px 0 0;
+    position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%);
+    color: rgba(255,255,255,0.7); font-size: 11px;
+    font-family: 'DM Mono', monospace; text-align: center;
+    background: rgba(0,0,0,0.45); padding: 2px 8px; border-radius: 4px;
+    pointer-events: none; z-index: 10; white-space: nowrap;
   }
 
   /* Loop range */
@@ -340,63 +343,26 @@
     display: flex; align-items: center; gap: 8px;
     padding: 4px 12px 8px;
   }
-  #loop-toggle {
-    background: transparent; border: 1.5px solid rgba(255,255,255,0.2);
-    border-radius: 100px; padding: 5px 12px;
-    color: rgba(255,255,255,0.5); font-family: 'DM Mono', monospace;
-    font-size: 12px; cursor: pointer; white-space: nowrap; flex-shrink: 0;
-    transition: all 0.15s;
-  }
-  #loop-toggle.active {
-    border-color: var(--accent2); color: var(--accent2);
-  }
-  #loop-set-in, #loop-set-out {
+  /* ── Loop-row unified button style ── */
+  #loop-set-in, #loop-set-out, #loop-clear, #loop-toggle,
+  #auto-next-toggle, #loop-export, #loop-convert, #export-format {
     background: transparent; border: 1.5px solid rgba(255,255,255,0.2);
     border-radius: 100px; padding: 5px 10px;
-    color: rgba(255,255,255,0.5); font-family: 'DM Mono', monospace;
+    color: rgba(255,255,255,0.85); font-family: 'DM Mono', monospace;
     font-size: 12px; cursor: pointer; white-space: nowrap; flex-shrink: 0;
-    transition: all 0.15s;
+    transition: all 0.15s; -webkit-appearance: none; appearance: none;
   }
-  #loop-set-in.set { border-color: rgba(200,255,71,0.5); color: var(--accent); }
-  #loop-set-out.set { border-color: rgba(200,255,71,0.5); color: var(--accent); }
-  #loop-set-in:active, #loop-set-out:active, #loop-toggle:active, #loop-clear:active { opacity: 0.6; }
-
-  #loop-clear {
-    background: transparent; border: 1.5px solid rgba(255,255,255,0.2);
-    border-radius: 100px; padding: 5px 10px;
-    color: rgba(255,255,255,0.4); font-family: 'DM Mono', monospace;
-    font-size: 12px; cursor: pointer; white-space: nowrap; flex-shrink: 0;
-    transition: all 0.15s;
-  }
-
-  #loop-export {
-    background: transparent; border: 1.5px solid rgba(200,255,71,0.3);
-    border-radius: 100px; padding: 5px 11px;
-    color: var(--accent); font-family: 'DM Mono', monospace;
-    font-size: 12px; cursor: pointer; white-space: nowrap; flex-shrink: 0;
-    transition: all 0.15s;
-  }
-  #loop-export:active { opacity: 0.6; }
+  #loop-set-in:active, #loop-set-out:active, #loop-clear:active,
+  #loop-toggle:active, #auto-next-toggle:active,
+  #loop-export:active, #loop-convert:active { opacity: 0.6; }
   #loop-export:disabled { opacity: 0.3; cursor: not-allowed; }
-
-  #loop-convert {
-    background: transparent; border: 1.5px solid rgba(71,212,255,0.3);
-    border-radius: 100px; padding: 5px 11px;
-    color: var(--accent2); font-family: 'DM Mono', monospace;
-    font-size: 12px; cursor: pointer; white-space: nowrap; flex-shrink: 0;
-    transition: all 0.15s;
-  }
-  #loop-convert:active { opacity: 0.6; }
-
-  #export-format {
-    background: transparent; border: 1.5px solid rgba(255,255,255,0.2);
-    border-radius: 100px; padding: 5px 8px;
-    color: rgba(255,255,255,0.6); font-family: 'DM Mono', monospace;
-    font-size: 12px; cursor: pointer; flex-shrink: 0;
-    -webkit-appearance: none; appearance: none;
-    text-align: center;
-  }
   #export-format option { background: #1a1a1a; color: #fff; }
+  /* activated states */
+  #loop-set-in.set  { border-color: rgba(200,255,71,0.5); color: var(--accent); }
+  #loop-set-out.set { border-color: rgba(200,255,71,0.5); color: var(--accent); }
+  #loop-toggle.active      { border-color: var(--accent2); color: var(--accent2); }
+  #auto-next-toggle.active { border-color: var(--accent2); color: var(--accent2); }
+  #loop-export.active, #loop-convert.active { opacity: 0.6; }
 
   /* Export progress overlay */
   #export-overlay {
@@ -430,7 +396,7 @@
 
   #loop-range-display {
     flex: 1; font-family: 'DM Mono', monospace; font-size: 10px;
-    color: rgba(255,255,255,0.35); text-align: left; white-space: nowrap;
+    color: rgba(255,255,255,0.85); text-align: left; white-space: nowrap;
     overflow: hidden; text-overflow: ellipsis;
   }
 
@@ -459,6 +425,37 @@
     transition: all 0.25s; z-index: 9999; white-space: nowrap;
   }
   #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+  #playlist-panel {
+    max-height: 120px; overflow-y: auto; -webkit-overflow-scrolling: touch;
+    padding: 2px 12px 8px; border-top: 1px solid rgba(255,255,255,0.08);
+    position: relative; z-index: 35;
+  }
+  .pl-header {
+    font-family: 'DM Mono', monospace; font-size: 10px;
+    text-transform: uppercase; letter-spacing: 0.18em;
+    color: rgba(255,255,255,0.3); padding: 4px 0 2px;
+  }
+  #playlist-list { list-style: none; margin: 0; padding: 0; }
+  #playlist-list .pl-item {
+    display: flex; align-items: center; gap: 6px;
+    padding: 4px 0; cursor: pointer; font-family: 'DM Mono', monospace;
+    font-size: 11px; color: rgba(255,255,255,0.65);
+    -webkit-tap-highlight-color: rgba(200,255,71,0.12);
+  }
+  #playlist-list .pl-item.current { color: var(--accent2); }
+  .pl-idx { width: 16px; text-align: right; opacity: 0.4; flex-shrink: 0; }
+  .pl-name { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .pl-del { flex-shrink: 0; font-size: 12px; opacity: 0.3; padding: 0 2px; color: #fff; }
+
+#playlist-panel { max-height:120px; overflow-y:auto; -webkit-overflow-scrolling:touch; padding:2px 12px 8px; border-top:1px solid rgba(255,255,255,0.08); position:relative; z-index:35; }
+.pl-header { font-family:'DM Mono',monospace; font-size:10px; text-transform:uppercase; letter-spacing:0.18em; color:rgba(255,255,255,0.3); padding:4px 0 2px; }
+#playlist-list { list-style:none; margin:0; padding:0; }
+#playlist-list .pl-item { display:flex; align-items:center; gap:6px; padding:5px 0; cursor:pointer; font-family:'DM Mono',monospace; font-size:11px; color:rgba(255,255,255,0.65); }
+#playlist-list .pl-item.current { color:var(--accent2); }
+.pl-idx { width:16px; text-align:right; opacity:0.4; flex-shrink:0; }
+.pl-name { flex:1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.pl-del { flex-shrink:0; font-size:12px; opacity:0.3; padding:0 4px; color:#fff; }
 </style>
 
 <script>
@@ -473,7 +470,7 @@ if ('serviceWorker' in navigator) {
 
 <!-- Upload -->
 <div id="upload-screen">
-  <div class="logo">Video Frame Player</div>
+  <div class="logo">TENG 影片播放器</div>
   <div class="upload-zone">
     <input type="file" id="file-input" accept="video/*">
     <div class="upload-icon">
@@ -598,8 +595,9 @@ if ('serviceWorker' in navigator) {
         <div id="thumb-canvas-strip"></div>
         <div id="loop-range-overlay"></div>
         <div id="timeline-indicator"></div>
+        <div id="thumb-status" class="thumb-loading" style="display:none;"></div>
       </div>
-      <div id="thumb-status" class="thumb-loading">生成縮圖中…</div>
+      
     </div>
 
     <div id="loop-row">
@@ -607,20 +605,26 @@ if ('serviceWorker' in navigator) {
       <button id="loop-set-out">OUT</button>
       <button id="loop-clear">✕</button>
       <button id="loop-toggle">⟲</button>
+      <button id="auto-next-toggle">連播</button>
+      <button id="loop-export">✂</button>
+      <button id="loop-convert">⇄</button>
       <select id="export-format">
         <option value="original">原格式</option>
         <option value="mp4">MP4</option>
         <option value="mov">MOV</option>
       </select>
-      <button id="loop-export">✂</button>
-      <button id="loop-convert">⇄</button>
     </div>
+<div id="playlist-panel" style="display:none;">
+  <div class="pl-header">播放佇列</div>
+  <ul id="playlist-list"></ul>
+</div>
   </div>
 </div>
 
 <div id="export-overlay">
   <p id="export-status">準備中…</p>
   <div id="export-progress-bar"><div id="export-progress-fill"></div></div>
+  <button id="export-download-btn" style="display:none;background:transparent;border:1.5px solid var(--accent);border-radius:100px;padding:10px 24px;color:var(--accent);font-family:'DM Mono',monospace;font-size:14px;cursor:pointer;margin-top:4px;">下載</button>
   <button id="export-cancel">取消</button>
 </div>
 
@@ -649,8 +653,14 @@ const miniBar           = document.getElementById('mini-bar');
 const miniPlayIcon      = document.getElementById('mini-play-icon');
 const timeOverlay       = document.getElementById('time-overlay');
 
+
+let playlist=[]; let currentIndex=-1; let autoPlayNext=true; let skipThumbOnLoad=false;
+let skipFpsAndThumb=false;
+// 連播：沿用第一支影片的 FPS / 速度；後續影片不產生縮圖
 let fps = 30;       // will be updated after detection
 let fpsDetected = false;
+let autoNextFps = 30;
+let autoNextSpeed = 1;
 let duration = 0;
 let isPlaying = false;
 let currentSpeed = 1;
@@ -672,6 +682,11 @@ function showToast(msg) {
   t.classList.add('show');
   setTimeout(() => t.classList.remove('show'), 2200);
 }
+function showQueueSavedToast(label, fpsText) {
+  showToast(`已加入佇列 (${label})`);
+  setTimeout(() => showToast(`已儲存佇列 FPS (${fpsText})`), 120);
+}
+
 function updateUI() {
   const ct = video.currentTime;
   const frame = Math.round(ct * fps);
@@ -836,18 +851,52 @@ changeInput.accept = 'video/*';
 changeInput.style.display = 'none';
 document.body.appendChild(changeInput);
 
-fileInput.addEventListener('change', e => {
+async function startQueuedItem(i) {
+  const item = playlist[i];
+  if (!item) return;
+  currentIndex = i;
+  skipThumbOnLoad = false;
+  queuePlayback = true;
+  if (typeof item.fps === 'number') showToast(`佇列 FPS (${item.fps}fps)`);
+  loadVideoFile(item.file);
+  renderPlaylist();
+}
+
+async function addFileToQueue(f) {
+  const item = { file: f, name: f.name, fps: null, fpsPromise: null };
+  playlist.push(item);
+  renderPlaylist();
+  showToast('已加入佇列 (' + playlist.length + ')');
+  item.fpsPromise = (async () => {
+    try {
+      const result = await parseFPS(item.file);
+      item.fps = (result && result > 1 && result <= 300) ? snapToCommonFPS(result) : 30;
+    } catch(e) {
+      item.fps = 30;
+    }
+    renderPlaylist();
+    showQueueSavedToast(playlist.length, item.fps + 'fps');
+    return item.fps;
+  })();
+  return item;
+}
+
+fileInput.addEventListener('change', async e => {
   const f = e.target.files && e.target.files[0];
   if (!f) return;
   fileInput.value = '';
-  loadVideoFile(f);
+  const item = await addFileToQueue(f);
+  if (currentIndex === -1) { currentIndex = 0; loadVideoFile(f); }
 });
-changeInput.addEventListener('change', e => {
+
+changeInput.addEventListener('change', async e => {
   const f = e.target.files && e.target.files[0];
   if (!f) return;
   changeInput.value = '';
-  loadVideoFile(f);
+  const item = await addFileToQueue(f);
+  if (currentIndex === -1) { currentIndex = 0; loadVideoFile(f); }
 });
+
 document.getElementById('change-video-btn').addEventListener('click', e => {
   e.stopPropagation(); changeInput.click();
 });
@@ -861,13 +910,28 @@ function loadVideoFile(file) {
   thumbStatus.textContent = '載入中…';
   thumbStatus.style.display = 'block';
 
-  document.querySelectorAll('.speed-btn').forEach(b => b.classList.remove('active'));
-  document.querySelector('.speed-btn[data-speed="1"]').classList.add('active');
-  currentSpeed = 1; video.playbackRate = 1;
-  fps = 30; fpsDetected = false;
-  document.querySelectorAll('.fps-btn').forEach(b => {
-    b.classList.toggle('active', b.dataset.fps === '30');
-  });
+  if (!skipFpsAndThumb) {
+    document.querySelectorAll('.speed-btn').forEach(b => b.classList.remove('active'));
+    document.querySelector('.speed-btn[data-speed="1"]').classList.add('active');
+    currentSpeed = 1; video.playbackRate = 1;
+    fps = 30; fpsDetected = false;
+    autoNextFps = 30;
+    autoNextSpeed = 1;
+    document.querySelectorAll('.fps-btn').forEach(b => {
+      b.classList.toggle('active', b.dataset.fps === '30');
+    });
+  } else {
+    currentSpeed = autoNextSpeed;
+    video.playbackRate = currentSpeed;
+    fps = autoNextFps;
+    fpsDetected = true;
+    document.querySelectorAll('.speed-btn').forEach(b => {
+      b.classList.toggle('active', parseFloat(b.dataset.speed) === currentSpeed);
+    });
+    document.querySelectorAll('.fps-btn').forEach(b => {
+      b.classList.toggle('active', parseFloat(b.dataset.fps) === fps);
+    });
+  }
   resetLoop();
 
   if (currentBlobUrl) { URL.revokeObjectURL(currentBlobUrl); currentBlobUrl = null; }
@@ -923,17 +987,36 @@ function onMetaLoaded() {
     return;
   }
   duration = video.duration;
-  fpsDetected = false;
-  fps = 30;
   totalTimeLabel.textContent = formatTime(duration);
-  thumbStatus.textContent = '偵測 fps 中…';
-  thumbStatus.style.display = 'block';
-  updateUI();
   updateLoopOverlay();
-  detectFPS().then(() => {
-    updateUI();
-    generateThumbnails();
+
+  const item = playlist[currentIndex] || null;
+  if (item && typeof item.fps === 'number') {
+    fps = item.fps;
+    fpsDetected = true;
+    loadedVideoFps = fps;
+    showToast(`佇列 FPS (${fps}fps)`);
+  } else {
+    fpsDetected = true;
+    fps = loadedVideoFps || 30;
+  }
+
+  currentSpeed = autoNextSpeed;
+  video.playbackRate = currentSpeed;
+  setTimeout(() => { video.playbackRate = currentSpeed; }, 0);
+  document.querySelectorAll('.fps-btn').forEach(b => {
+    b.classList.toggle('active', parseFloat(b.dataset.fps) === fps);
   });
+  document.querySelectorAll('.speed-btn').forEach(b => {
+    b.classList.toggle('active', parseFloat(b.dataset.speed) === currentSpeed);
+  });
+  updateUI();
+  if (skipThumbOnLoad) {
+    skipThumbOnLoad = false;
+    thumbStatus.style.display = 'none';
+    return;
+  }
+  generateThumbnails();
 }
 
 // ── Video error handling ──
@@ -976,6 +1059,7 @@ function detectFPS() {
       const result = await parseFPS(currentFile);
       if (result && result > 1 && result <= 300) {
         setFps(snapToCommonFPS(result));
+        if (!skipFpsAndThumb) autoNextFps = fps;
         showToast(`自動偵測 ${fps} fps`);
       } else {
         showToast('無法偵測，請手動選 FPS');
@@ -1144,40 +1228,98 @@ function seekExact(t) {
 }
 
 // ── Thumbnails ──
+let thumbGenId = 0; // increment to cancel in-flight generation
+
+async function drawThumb(seekT, cw, ch) {
+  await seekExact(seekT);
+  const c = document.createElement('canvas');
+  c.width = cw; c.height = ch;
+  c.getContext('2d').drawImage(video, 0, 0, cw, ch);
+  return c;
+}
+
 async function generateThumbnails() {
+  const myId = ++thumbGenId;
   thumbCanvasStrip.innerHTML = '';
   thumbStatus.style.display = 'block';
-  thumbStatus.textContent = '生成縮圖中…';
-  await new Promise(r => setTimeout(r, 100));
+  thumbStatus.textContent = '縮圖 初始化…';
+  await new Promise(r => setTimeout(r, 0));
 
   if (!video.videoWidth || !video.duration) {
     thumbStatus.style.display = 'none'; return;
   }
 
   const W = thumbnailStrip.offsetWidth || 320;
-  const H = thumbnailStrip.offsetHeight || 50;
+  const H = thumbnailStrip.offsetHeight || 40;
   const vw = video.videoWidth || 16;
   const vh = video.videoHeight || 9;
   const aspect = vw / vh;
+  const fileSize = currentFile ? currentFile.size : 0;
+  const isLarge = fileSize > 1000 * 1024 * 1024 || video.videoWidth >= 3840;
   const tw = Math.round(H * aspect);
-  const count = Math.max(6, Math.round(W / tw));
+  const baseCount = Math.max(6, Math.round(W / tw));
+  const count = baseCount;
+  const startOffset = Math.max(0.5, duration * 0.01);
+  const usableDuration = duration - startOffset;
+  const step = usableDuration / count;
+
+  const placeholder = document.createElement('canvas');
+  placeholder.width = 8;
+  placeholder.height = 8;
+  const pctx = placeholder.getContext('2d');
+  const gradient = pctx.createLinearGradient(0, 0, 8, 8);
+  gradient.addColorStop(0, 'rgba(255,255,255,0.10)');
+  gradient.addColorStop(1, 'rgba(255,255,255,0.04)');
+  pctx.fillStyle = gradient;
+  pctx.fillRect(0, 0, 8, 8);
 
   for (let i = 0; i < count; i++) {
-    try {
-      await seekExact((i / count) * duration);
-      const c = document.createElement('canvas');
-      c.width = tw; c.height = H;
-      c.getContext('2d').drawImage(video, 0, 0, tw, H);
-      c.style.cssText = `width:${tw}px;height:${H}px;flex-shrink:0;`;
-      thumbCanvasStrip.appendChild(c);
-    } catch(e) {
-      // Skip this frame if seek fails
-    }
+    const c = document.createElement('canvas');
+    c.width = tw; c.height = H;
+    c.getContext('2d').drawImage(placeholder, 0, 0, tw, H);
+    c.style.cssText = `width:${tw}px;height:${H}px;flex-shrink:0;`;
+    thumbCanvasStrip.appendChild(c);
   }
+  thumbStatus.textContent = '縮圖 載入中…';
 
-  thumbStatus.style.display = 'none';
-  try { await seekExact(0); } catch(e) {}
-  updateUI();
+  const cacheCanvas = document.createElement('canvas');
+  const cw = Math.max(1, Math.round(tw * (isLarge ? 1.0 : 1)));
+  const ch = Math.max(1, Math.round(H * (isLarge ? 1.0 : 1)));
+  cacheCanvas.width = cw;
+  cacheCanvas.height = ch;
+  const cacheCtx = cacheCanvas.getContext('2d');
+  cacheCtx.imageSmoothingEnabled = true;
+  if ('imageSmoothingQuality' in cacheCtx) cacheCtx.imageSmoothingQuality = 'high';
+
+  let i = 0;
+  async function fillNext() {
+    if (thumbGenId !== myId) return;
+    if (i >= count) {
+      thumbStatus.style.display = 'none';
+      try { await seekExact(0); } catch(e) {}
+      updateUI();
+      return;
+    }
+    try {
+      const t = startOffset + i * step;
+      await seekExact(t);
+      if (thumbGenId !== myId) return;
+      cacheCtx.clearRect(0, 0, cw, ch);
+      cacheCtx.drawImage(video, 0, 0, cw, ch);
+      const c = thumbCanvasStrip.children[i];
+      if (c) {
+        const ctx = c.getContext('2d');
+        ctx.imageSmoothingEnabled = true;
+        if ('imageSmoothingQuality' in ctx) ctx.imageSmoothingQuality = 'high';
+        ctx.clearRect(0, 0, tw, H);
+        ctx.drawImage(cacheCanvas, 0, 0, tw, H);
+      }
+      thumbStatus.textContent = `縮圖 ${i + 1}/${count}`;
+    } catch(e) {}
+    i++;
+    setTimeout(fillNext, isLarge ? 30 : 0);
+  }
+  fillNext();
 }
 
 // ── Play / Pause ──
@@ -1226,7 +1368,23 @@ function toggleFrameMode() {
 
 video.addEventListener('timeupdate', updateUI);
 video.addEventListener('ended', () => {
-  isPlaying = false; setPlayIcon(false); stopFrameMode(); clearTimeout(autoHideTimer);
+  stopFrameMode(); clearTimeout(autoHideTimer);
+  if (autoPlayNext && currentIndex >= 0 && currentIndex + 1 < playlist.length) {
+    currentIndex++;
+    // 連播：保留上一支影片的 FPS / 速度，只跳過縮圖
+    skipThumbOnLoad = true;
+    skipFpsAndThumb = true;
+    autoNextSpeed = currentSpeed;
+    autoNextFps = fps;
+    loadVideoFile(playlist[currentIndex].file);
+    renderPlaylist();
+    video.addEventListener('canplay', function ap() {
+      video.removeEventListener('canplay', ap);
+      video.play(); isPlaying = true; setPlayIcon(true);
+    });
+    return;
+  }
+  isPlaying = false; setPlayIcon(false);
 });
 
 // ── Speed buttons ──
@@ -1343,7 +1501,7 @@ function updateLoopOverlay() {
     loopRangeOverlay.style.left  = l + '%';
     loopRangeOverlay.style.width = w + '%';
     loopRangeOverlay.classList.add('show');
-    loopRangeDisplay.textContent = `${formatTime(loopIn)} → ${formatTime(loopOut)}`;
+    loopRangeDisplay.textContent = `${formatTime(loopIn)} → ${formatTime(loopOut)} = ${formatTime(loopOut - loopIn)}`;
   } else {
     loopRangeOverlay.classList.remove('show');
     loopRangeDisplay.textContent = '—';
@@ -1473,6 +1631,159 @@ let exportCancelled = false;
         elst removal, stsd passthrough.
    No WASM. Supports any file size.
    ═══════════════════════════════════════════════ */
+
+/* ── top-level helpers (hoisted for Safari scope) ── */
+
+function ru32(v, o) { return v.getUint32(o, false); }
+
+function ri32(v, o) { return v.getInt32(o, false); }
+
+function ru64(v, o) { return ru32(v,o) * 0x100000000 + ru32(v,o+4); }
+
+function r4cc(v, o) { let s=''; for(let i=0;i<4;i++) s+=String.fromCharCode(v.getUint8(o+i)); return s; }
+
+function wu32(a, o, v) { a[o]=(v>>>24)&0xff; a[o+1]=(v>>>16)&0xff; a[o+2]=(v>>>8)&0xff; a[o+3]=v&0xff; }
+
+function writeBox(name, payload) {
+    const sz = 8 + payload.byteLength;
+    const out = new Uint8Array(sz);
+    wu32(out,0,sz);
+    for(let i=0;i<4;i++) out[4+i]=name.charCodeAt(i);
+    out.set(payload,8);
+    return out;
+  }
+
+function concatU8(...arrays) {
+    const total = arrays.reduce((s,a)=>s+a.byteLength,0);
+    const out = new Uint8Array(total); let off=0;
+    for(const a of arrays){out.set(a,off);off+=a.byteLength;}
+    return out;
+  }
+
+function iterBoxes(view, start, end, cb) {
+    let o=start;
+    while(o+8<=end){
+      let size=ru32(view,o); const name=r4cc(view,o+4); let hs=8;
+      if(size===1){if(o+16>end)break;size=Number(ru64(view,o+8));hs=16;}
+      if(size<hs||o+size>end+1)break;
+      cb(name,o,size,hs); o+=size;
+    }
+  }
+
+function findBox(view, start, end, target) {
+    let found=null;
+    iterBoxes(view,start,end,(name,o,size,hs)=>{if(name===target)found={off:o,size,hs};});
+    return found;
+  }
+
+function buildStts(deltas){
+    /* deltas = array of per-sample delta values (numbers) */
+    const runs=[];
+    for(let i=0;i<deltas.length;){
+      const d=deltas[i]; let c=1;
+      while(i+c<deltas.length&&deltas[i+c]===d)c++;
+      runs.push({count:c,delta:d}); i+=c;
+    }
+    const p=new Uint8Array(8+runs.length*8);
+    wu32(p,0,0);wu32(p,4,runs.length);
+    for(let i=0;i<runs.length;i++){wu32(p,8+i*8,runs[i].count);wu32(p,12+i*8,runs[i].delta);}
+    return writeBox('stts',p);
+  }
+
+function buildCtts(ctsArr){
+    /* ctsArr = array of per-sample CTS offset values (signed int32) */
+    const runs=[];
+    for(let i=0;i<ctsArr.length;){
+      const d=ctsArr[i]; let c=1;
+      while(i+c<ctsArr.length&&ctsArr[i+c]===d)c++;
+      runs.push({count:c,offset:d}); i+=c;
+    }
+    /* version=1 for signed offsets (required for negative CTS on newer iPhone) */
+    const p=new Uint8Array(8+runs.length*8);
+    p[0]=1; // version=1
+    wu32(p,4,runs.length);
+    const pv=new DataView(p.buffer);
+    for(let i=0;i<runs.length;i++){
+      wu32(p,8+i*8,runs[i].count);
+      pv.setInt32(12+i*8,runs[i].offset,false);
+    }
+    return writeBox('ctts',p);
+  }
+
+function buildStss(kfs){
+    /* kfs = 0-based indices of keyframes in the NEW sample list */
+    const p=new Uint8Array(8+kfs.length*4);
+    wu32(p,0,0);wu32(p,4,kfs.length);
+    for(let i=0;i<kfs.length;i++)wu32(p,8+i*4,kfs[i]+1);
+    return writeBox('stss',p);
+  }
+
+function buildStsz(sza){
+    const p=new Uint8Array(12+sza.length*4);
+    wu32(p,0,0);wu32(p,4,0);wu32(p,8,sza.length);
+    for(let i=0;i<sza.length;i++)wu32(p,12+i*4,sza[i]);
+    return writeBox('stsz',p);
+  }
+
+function buildStsc(){
+    /* one sample per chunk (simplest valid layout) */
+    const p=new Uint8Array(20);
+    wu32(p,0,0);wu32(p,4,1);wu32(p,8,1);wu32(p,12,1);wu32(p,16,1);
+    return writeBox('stsc',p);
+  }
+
+function buildElst(entries, movieTScale) {
+    // entries: [{segDurSec, mediaTimeTicks (-1=empty or ticks in track tScale), mediaRate=1}]
+    // version 0, all durations in movie timescale, mediaTime in track timescale
+    const n = entries.length;
+    const p = new Uint8Array(8 + n * 12); // ver+flags(4) + count(4) + n*12
+    wu32(p, 0, 0); // version=0, flags=0
+    wu32(p, 4, n);
+    for (let i=0; i<n; i++) {
+      wu32(p, 8 + i*12,     entries[i].segDur);    // segment_duration (movie tScale ticks)
+      wu32(p, 8 + i*12 + 4, entries[i].mediaTime); // media_time (0xFFFFFFFF = empty)
+      wu32(p, 8 + i*12 + 8, 0x00010000);           // media_rate = 1.0
+    }
+    return writeBox('edts', writeBox('elst', p));
+  }
+
+function buildStco(offs){
+    const p=new Uint8Array(8+offs.length*4);
+    wu32(p,0,0);wu32(p,4,offs.length);
+    for(let i=0;i<offs.length;i++)wu32(p,8+i*4,offs[i]);
+    return writeBox('stco',p);
+  }
+
+async function readChunk(start, end) {
+  const MAX_READ = 64 * 1024 * 1024;
+  async function readOnce(s, e) {
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        const buf = await new Promise((res, rej) => {
+          const r = new FileReader();
+          r.onload = ev => { const ab = ev.target.result; if (!ab || ab.byteLength === 0) rej(new Error('empty')); else res(ab); };
+          r.onerror = () => rej(new Error('fr'));
+          r.readAsArrayBuffer(currentFile.slice(s, e));
+        });
+        return new Uint8Array(buf);
+      } catch(_) {
+        if (attempt === 2) throw new Error('讀取失敗 @ ' + s);
+        await new Promise(r => setTimeout(r, 150 * (attempt + 1)));
+      }
+    }
+  }
+  if (end - start <= MAX_READ) return readOnce(start, end);
+  const parts = [];
+  for (let pos = start; pos < end; pos += MAX_READ) {
+    if (exportCancelled) throw new Error('cancelled');
+    parts.push(await readOnce(pos, Math.min(pos + MAX_READ, end)));
+  }
+  const total = parts.reduce((n, p) => n + p.byteLength, 0);
+  const merged = new Uint8Array(total);
+  let off = 0; for (const p of parts) { merged.set(p, off); off += p.byteLength; }
+  return merged;
+}
+
 async function trimMp4(file, startSec, endSec, onProgress) {
   const fileSize = file.size;
 
@@ -1482,24 +1793,33 @@ async function trimMp4(file, startSec, endSec, onProgress) {
   async function readSlice(s, e) {
     const size = e - s;
     if (size <= 0) return new ArrayBuffer(0);
-    if (size <= FR_CHUNK) {
-      return new Promise((res, rej) => {
-        const r = new FileReader();
-        r.onload = ev => res(ev.target.result);
-        r.onerror = ev => rej(new Error('FileReader error @ ' + s + '-' + e));
-        r.readAsArrayBuffer(file.slice(s, e));
-      });
+    async function readOnceSlice(from, to) {
+      for (let attempt = 0; attempt < 4; attempt++) {
+        try {
+          const buf = await new Promise((res, rej) => {
+            const r = new FileReader();
+            r.onload = ev => {
+              const ab = ev.target.result;
+              if (!ab || ab.byteLength === 0) rej(new Error('empty'));
+              else res(ab);
+            };
+            r.onerror = () => rej(new Error('FileReader error @ ' + from + '-' + to));
+            r.readAsArrayBuffer(file.slice(from, to));
+          });
+          return buf;
+        } catch(err) {
+          if (attempt === 3) throw err;
+          await new Promise(r => setTimeout(r, 200 * (attempt + 1)));
+        }
+      }
     }
-    // large slice: read in FR_CHUNK pieces and concat
+    if (size <= FR_CHUNK) {
+      return readOnceSlice(s, e);
+    }
     const parts = [];
     for (let pos = s; pos < e; pos += FR_CHUNK) {
       if (exportCancelled) throw new Error('cancelled');
-      const part = await new Promise((res, rej) => {
-        const r = new FileReader();
-        r.onload = ev => res(ev.target.result);
-        r.onerror = ev => rej(new Error('FileReader error @ ' + pos));
-        r.readAsArrayBuffer(file.slice(pos, Math.min(pos + FR_CHUNK, e)));
-      });
+      const part = await readOnceSlice(pos, Math.min(pos + FR_CHUNK, e));
       parts.push(new Uint8Array(part));
     }
     const total = parts.reduce((s, a) => s + a.byteLength, 0);
@@ -1507,39 +1827,24 @@ async function trimMp4(file, startSec, endSec, onProgress) {
     for (const p of parts) { out.set(p, off); off += p.byteLength; }
     return out.buffer;
   }
-  function ru32(v, o) { return v.getUint32(o, false); }
-  function ri32(v, o) { return v.getInt32(o, false); }
-  function ru64(v, o) { return ru32(v,o) * 0x100000000 + ru32(v,o+4); }
-  function r4cc(v, o) { let s=''; for(let i=0;i<4;i++) s+=String.fromCharCode(v.getUint8(o+i)); return s; }
-  function wu32(a, o, v) { a[o]=(v>>>24)&0xff; a[o+1]=(v>>>16)&0xff; a[o+2]=(v>>>8)&0xff; a[o+3]=v&0xff; }
-  function writeBox(name, payload) {
-    const sz = 8 + payload.byteLength;
-    const out = new Uint8Array(sz);
-    wu32(out,0,sz);
-    for(let i=0;i<4;i++) out[4+i]=name.charCodeAt(i);
-    out.set(payload,8);
-    return out;
-  }
-  function concatU8(...arrays) {
-    const total = arrays.reduce((s,a)=>s+a.byteLength,0);
-    const out = new Uint8Array(total); let off=0;
-    for(const a of arrays){out.set(a,off);off+=a.byteLength;}
-    return out;
-  }
-  function iterBoxes(view, start, end, cb) {
-    let o=start;
-    while(o+8<=end){
-      let size=ru32(view,o); const name=r4cc(view,o+4); let hs=8;
-      if(size===1){if(o+16>end)break;size=Number(ru64(view,o+8));hs=16;}
-      if(size<hs||o+size>end+1)break;
-      cb(name,o,size,hs); o+=size;
-    }
-  }
-  function findBox(view, start, end, target) {
-    let found=null;
-    iterBoxes(view,start,end,(name,o,size,hs)=>{if(name===target)found={off:o,size,hs};});
-    return found;
-  }
+  
+
+  
+
+  
+
+  
+
+  
+
+  
+
+  
+
+  
+
+  
+
 
   /* ── locate moov by scanning top-level boxes ── */
   onProgress(0.05, '掃描 moov…');
@@ -1783,77 +2088,20 @@ async function trimMp4(file, startSec, endSec, onProgress) {
   }
 
   /* ── box builders ── */
-  function buildStts(deltas){
-    /* deltas = array of per-sample delta values (numbers) */
-    const runs=[];
-    for(let i=0;i<deltas.length;){
-      const d=deltas[i]; let c=1;
-      while(i+c<deltas.length&&deltas[i+c]===d)c++;
-      runs.push({count:c,delta:d}); i+=c;
-    }
-    const p=new Uint8Array(8+runs.length*8);
-    wu32(p,0,0);wu32(p,4,runs.length);
-    for(let i=0;i<runs.length;i++){wu32(p,8+i*8,runs[i].count);wu32(p,12+i*8,runs[i].delta);}
-    return writeBox('stts',p);
-  }
-  function buildCtts(ctsArr){
-    /* ctsArr = array of per-sample CTS offset values (signed int32) */
-    const runs=[];
-    for(let i=0;i<ctsArr.length;){
-      const d=ctsArr[i]; let c=1;
-      while(i+c<ctsArr.length&&ctsArr[i+c]===d)c++;
-      runs.push({count:c,offset:d}); i+=c;
-    }
-    /* version=1 for signed offsets (required for negative CTS on newer iPhone) */
-    const p=new Uint8Array(8+runs.length*8);
-    p[0]=1; // version=1
-    wu32(p,4,runs.length);
-    const pv=new DataView(p.buffer);
-    for(let i=0;i<runs.length;i++){
-      wu32(p,8+i*8,runs[i].count);
-      pv.setInt32(12+i*8,runs[i].offset,false);
-    }
-    return writeBox('ctts',p);
-  }
-  function buildStss(kfs){
-    /* kfs = 0-based indices of keyframes in the NEW sample list */
-    const p=new Uint8Array(8+kfs.length*4);
-    wu32(p,0,0);wu32(p,4,kfs.length);
-    for(let i=0;i<kfs.length;i++)wu32(p,8+i*4,kfs[i]+1);
-    return writeBox('stss',p);
-  }
-  function buildStsz(sza){
-    const p=new Uint8Array(12+sza.length*4);
-    wu32(p,0,0);wu32(p,4,0);wu32(p,8,sza.length);
-    for(let i=0;i<sza.length;i++)wu32(p,12+i*4,sza[i]);
-    return writeBox('stsz',p);
-  }
-  function buildStsc(){
-    /* one sample per chunk (simplest valid layout) */
-    const p=new Uint8Array(20);
-    wu32(p,0,0);wu32(p,4,1);wu32(p,8,1);wu32(p,12,1);wu32(p,16,1);
-    return writeBox('stsc',p);
-  }
-  function buildElst(entries, movieTScale) {
-    // entries: [{segDurSec, mediaTimeTicks (-1=empty or ticks in track tScale), mediaRate=1}]
-    // version 0, all durations in movie timescale, mediaTime in track timescale
-    const n = entries.length;
-    const p = new Uint8Array(8 + n * 12); // ver+flags(4) + count(4) + n*12
-    wu32(p, 0, 0); // version=0, flags=0
-    wu32(p, 4, n);
-    for (let i=0; i<n; i++) {
-      wu32(p, 8 + i*12,     entries[i].segDur);    // segment_duration (movie tScale ticks)
-      wu32(p, 8 + i*12 + 4, entries[i].mediaTime); // media_time (0xFFFFFFFF = empty)
-      wu32(p, 8 + i*12 + 8, 0x00010000);           // media_rate = 1.0
-    }
-    return writeBox('edts', writeBox('elst', p));
-  }
-  function buildStco(offs){
-    const p=new Uint8Array(8+offs.length*4);
-    wu32(p,0,0);wu32(p,4,offs.length);
-    for(let i=0;i<offs.length;i++)wu32(p,8+i*4,offs[i]);
-    return writeBox('stco',p);
-  }
+  
+
+  
+
+  
+
+  
+
+  
+
+  
+
+  
+
 
   /* ── rebuild each trak ── */
   const newTrakBoxes=[];
@@ -2085,121 +2333,139 @@ document.getElementById('loop-export').addEventListener('click', async e => {
 
   const ext      = currentFile.name.split('.').pop().toLowerCase();
   const base     = currentFile.name.replace(/\.[^.]+$/, '') || 'clip';
-  const ss       = loopIn.toFixed(3);
   const mimeType = ext === 'mov' ? 'video/quicktime' : 'video/mp4';
-  const filename = `${base}_clip_${ss.replace('.','_')}.${ext}`;
+  const dlBtn    = document.getElementById('export-download-btn');
 
-  /* readChunk: read a slice of currentFile with retry.
-     Safari iOS FileReader can fail on large or misaligned reads — retry up to 3× */
-  async function readChunk(start, end) {
-    for (let attempt = 0; attempt < 3; attempt++) {
-      try {
-        const buf = await new Promise((res, rej) => {
-          const r = new FileReader();
-          r.onload = ev => {
-            const ab = ev.target.result;
-            if (!ab || ab.byteLength === 0) rej(new Error('empty'));
-            else res(ab);
-          };
-          r.onerror = () => rej(new Error('fr'));
-          r.readAsArrayBuffer(currentFile.slice(start, end));
-        });
-        return new Uint8Array(buf);
-      } catch(_) {
-        if (attempt === 2) throw new Error('讀取失敗 @ ' + start);
-        await new Promise(r => setTimeout(r, 150 * (attempt + 1)));
+  /* waitForUserDownload: show download button, wait for tap, then trigger download */
+  function waitForUserDownload(blob, filename, label) {
+    return new Promise((resolve, reject) => {
+      dlBtn.textContent = label;
+      dlBtn.style.display = 'block';
+      function onTap() {
+        dlBtn.removeEventListener('click', onTap);
+        dlBtn.style.display = 'none';
+        if (exportCancelled) { reject(new Error('cancelled')); return; }
+        const url = URL.createObjectURL(blob);
+        const a   = document.createElement('a');
+        a.href = url; a.download = filename;
+        document.body.appendChild(a); a.click(); document.body.removeChild(a);
+        setTimeout(() => URL.revokeObjectURL(url), 30000);
+        resolve();
       }
-    }
+      dlBtn.addEventListener('click', onTap);
+    });
   }
 
-  try {
+  /* downloadParts: assemble blob and prompt user to tap download */
+  async function downloadParts(parts, filename, label) {
+    const blob = new Blob(parts, { type: mimeType });
+    await waitForUserDownload(blob, filename, label);
+  }
+
+  /* processTrimSegment */
+  async function processTrimSegment(segIn, segOut, filename, partLabel, baseProgress, progressRange) {
+    if (exportCancelled) throw new Error('cancelled');
+    exportStatus.textContent = `${partLabel}分析中…`;
+    exportProgressF.style.width = baseProgress + '%';
+
     if (['mp4','mov','m4v'].includes(ext)) {
-      const result = await trimMp4(currentFile, loopIn, loopOut, (ratio, msg) => {
+      const result = await trimMp4(currentFile, segIn, segOut, (ratio, msg) => {
         if (exportCancelled) throw new Error('cancelled');
-        exportProgressF.style.width = Math.round(ratio * 100) + '%';
-        exportStatus.textContent = msg;
+        exportProgressF.style.width = Math.round(baseProgress + progressRange * 0.68 * ratio) + '%';
+        exportStatus.textContent = `${partLabel}${msg}`;
       });
-      if (exportCancelled) { exportOverlay.classList.remove('show'); return; }
+      if (exportCancelled) throw new Error('cancelled');
 
       const { ftypBox, newMoovBox, mdatHeader, orderedSamples } = result;
-
-      // Read orderedSamples in EXACT output order (track-separated: all video → all audio)
-      // DO NOT merge by file position — source file is interleaved but output must be sequential
-      const totalBytes = orderedSamples.reduce((s, r) => s + r.size, 0);
       const parts = [ftypBox, newMoovBox, mdatHeader];
       let readBytes = 0;
-      const total = orderedSamples.length;
+      const totalBytes = orderedSamples.reduce((s, r) => s + r.size, 0);
 
-      exportProgressF.style.width = '68%';
-      exportStatus.textContent = '讀取資料…';
-
-      // Batch adjacent samples (consecutive in both output AND source file)
-      // to reduce FileReader calls without breaking output order
       const batches = [];
       for (const s of orderedSamples) {
         const last = batches[batches.length - 1];
-        // Only merge if this sample immediately follows the previous in the source file
         if (last && last.srcEnd === s.fileStart) {
           last.srcEnd = s.fileStart + s.size;
-          last.outSize += s.size;
         } else {
-          batches.push({ srcStart: s.fileStart, srcEnd: s.fileStart + s.size, outSize: s.size });
+          batches.push({ srcStart: s.fileStart, srcEnd: s.fileStart + s.size });
         }
       }
 
+      const readBase  = baseProgress + Math.round(progressRange * 0.68);
+      const readRange = Math.round(progressRange * 0.28);
       for (const batch of batches) {
-        if (exportCancelled) { exportOverlay.classList.remove('show'); return; }
-        // Read this batch in 512KB pieces to stay under iOS FileReader limit
+        if (exportCancelled) throw new Error('cancelled');
         const PIECE = 512 * 1024;
         let pos = batch.srcStart;
         while (pos < batch.srcEnd) {
-          if (exportCancelled) { exportOverlay.classList.remove('show'); return; }
+          if (exportCancelled) throw new Error('cancelled');
           const chunkEnd = Math.min(pos + PIECE, batch.srcEnd);
           const chunk = await readChunk(pos, chunkEnd);
           parts.push(chunk);
           readBytes += chunkEnd - pos;
           pos = chunkEnd;
-          exportProgressF.style.width = Math.round(68 + 28 * readBytes / totalBytes) + '%';
-          exportStatus.textContent = `讀取 ${Math.round(100 * readBytes / totalBytes)}%…`;
+          exportProgressF.style.width = Math.round(readBase + readRange * readBytes / totalBytes) + '%';
+          exportStatus.textContent = `${partLabel}讀取 ${Math.round(100 * readBytes / totalBytes)}%…`;
           await new Promise(r => setTimeout(r, 0));
         }
       }
 
-      exportProgressF.style.width = '98%';
-      exportStatus.textContent = '下載中…';
-
-      // Build Blob from parts — Safari stores refs, not copies
-      const blob = new Blob(parts, { type: mimeType });
-      const url  = URL.createObjectURL(blob);
-      const a    = document.createElement('a');
-      a.href = url; a.download = filename;
-      document.body.appendChild(a); a.click(); document.body.removeChild(a);
-      setTimeout(() => URL.revokeObjectURL(url), 30000);
-
-      exportProgressF.style.width = '100%';
-      exportStatus.textContent = '完成！';
-      setTimeout(() => exportOverlay.classList.remove('show'), 1400);
-      showToast('剪輯完成');
+      exportProgressF.style.width = Math.round(baseProgress + progressRange * 0.98) + '%';
+      exportStatus.textContent = `${partLabel}準備下載…`;
+      const dlLabel = partLabel ? `⬇ 下載 ${partLabel}` : '⬇ 下載剪輯';
+      await downloadParts(parts, filename, dlLabel);
 
     } else {
-      exportStatus.textContent = '即時錄製模式…';
-      exportProgressF.style.width = '5%';
-      const { blob, ext: outExt } = await trimByMediaRecorder(loopIn, loopOut, (ratio, msg) => {
-        exportProgressF.style.width = Math.round(ratio * 100) + '%';
-        exportStatus.textContent = msg;
+      exportStatus.textContent = `${partLabel}即時錄製…`;
+      exportProgressF.style.width = (baseProgress + 5) + '%';
+      const { blob, ext: outExt } = await trimByMediaRecorder(segIn, segOut, (ratio, msg) => {
+        exportProgressF.style.width = Math.round(baseProgress + progressRange * ratio) + '%';
+        exportStatus.textContent = `${partLabel}${msg}`;
       });
-      if (exportCancelled) { exportOverlay.classList.remove('show'); return; }
-      const url = URL.createObjectURL(blob);
-      const a   = document.createElement('a');
-      a.href = url; a.download = `${base}_clip_${ss.replace('.','_')}.${outExt}`;
-      document.body.appendChild(a); a.click(); document.body.removeChild(a);
-      setTimeout(() => URL.revokeObjectURL(url), 30000);
-      exportProgressF.style.width = '100%';
-      exportStatus.textContent = '完成！';
-      setTimeout(() => exportOverlay.classList.remove('show'), 1400);
-      showToast('剪輯完成');
+      if (exportCancelled) throw new Error('cancelled');
+      const dlLabel = partLabel ? `⬇ 下載 ${partLabel}` : '⬇ 下載剪輯';
+      const blobObj = blob;
+      await waitForUserDownload(blobObj, `${base}_clip${partLabel ? '_'+partLabel.replace(/[()\/]/g,'') : ''}.${outExt}`, dlLabel);
     }
+  }
+
+  try {
+    const clipDuration  = loopOut - loopIn;
+    const LIMIT         = 300 * 1024 * 1024;
+    const estimatedSize = (clipDuration / duration) * currentFile.size;
+
+    if (estimatedSize > LIMIT) {
+      const nParts = Math.ceil(estimatedSize / LIMIT);
+      const segDur = clipDuration / nParts;
+      showToast(`預估 ${(estimatedSize/1024/1024).toFixed(0)}MB，分割為 ${nParts} 個檔案`);
+      await new Promise(r => setTimeout(r, 800));
+
+      for (let i = 0; i < nParts; i++) {
+        if (exportCancelled) { exportOverlay.classList.remove('show'); dlBtn.style.display='none'; return; }
+        const segIn  = loopIn + i * segDur;
+        const segOut = Math.min(loopIn + (i + 1) * segDur, loopOut);
+        const suffix  = String(i + 1).padStart(2, '0');
+        const filename = `${base}_clip_part${suffix}.${ext}`;
+        const partLabel = `(${i+1}/${nParts}) `;
+        const baseProgress  = Math.round(100 * i / nParts);
+        const progressRange = Math.round(100 / nParts);
+        await processTrimSegment(segIn, segOut, filename, partLabel, baseProgress, progressRange);
+        await new Promise(r => setTimeout(r, 600));
+      }
+    } else {
+      const ss = loopIn.toFixed(3);
+      const filename = `${base}_clip_${ss.replace('.','_')}.${ext}`;
+      await processTrimSegment(loopIn, loopOut, filename, '', 0, 100);
+    }
+
+    dlBtn.style.display = 'none';
+    exportProgressF.style.width = '100%';
+    exportStatus.textContent = '完成！';
+    setTimeout(() => exportOverlay.classList.remove('show'), 1400);
+    showToast('剪輯完成');
+
   } catch(err) {
+    dlBtn.style.display = 'none';
     exportOverlay.classList.remove('show');
     if (err.message !== 'cancelled') showToast('剪輯失敗：' + (err.message || err));
   }
@@ -2240,6 +2506,66 @@ document.getElementById('loop-convert').addEventListener('click', async e => {
   }
 });
 
+
+/* ── Playlist ── */
+const _playlistList  = document.getElementById('playlist-list');
+const _playlistPanel = document.getElementById('playlist-panel');
+
+function renderPlaylist() {
+  if (!_playlistList) return;
+  _playlistList.innerHTML = '';
+  playlist.forEach((item, i) => {
+    const li = document.createElement('li');
+    li.className = 'pl-item' + (i === currentIndex ? ' current' : '');
+    const fpsLabel = (typeof item.fps === 'number') ? ` <span class="pl-fps">(${item.fps}fps)</span>` : '';
+    li.innerHTML =
+      '<span class="pl-idx">' + (i+1) + '</span>' +
+      '<span class="pl-name">' + item.name + fpsLabel + '</span>' +
+      '<span class="pl-del">✕</span>';
+    li.querySelector('.pl-del').addEventListener('click', ev => {
+      ev.stopPropagation();
+      playlist.splice(i, 1);
+      if (currentIndex >= playlist.length) currentIndex = playlist.length - 1;
+      renderPlaylist();
+    });
+    li.addEventListener('click', ev => {
+      ev.stopPropagation();
+      startQueuedItem(i);
+    });
+    _playlistList.appendChild(li);
+  });
+  if (_playlistPanel) _playlistPanel.style.display = playlist.length > 1 ? 'block' : 'none';
+}
+
+/* ── Auto-next toggle ── */
+(function() {
+  const btn = document.getElementById('auto-next-toggle');
+  if (!btn) return;
+  btn.classList.toggle('active', autoPlayNext);
+  btn.addEventListener('click', e => {
+    e.stopPropagation();
+    autoPlayNext = !autoPlayNext;
+    btn.classList.toggle('active', autoPlayNext);
+    showToast(autoPlayNext ? '已開啟連續播放' : '已關閉連續播放');
+    resetAutoHide();
+  });
+})();
+
+const _plList = document.getElementById('playlist-list');
+const _plPanel = document.getElementById('playlist-panel');
+function renderPlaylist() {
+  if (!_plList) return;
+  _plList.innerHTML = '';
+  playlist.forEach((item, i) => {
+    const li = document.createElement('li');
+    li.className = 'pl-item' + (i === currentIndex ? ' current' : '');
+    li.innerHTML = '<span class="pl-idx">' + (i+1) + '</span><span class="pl-name">' + item.name + '</span><span class="pl-del">✕</span>';
+    li.querySelector('.pl-del').addEventListener('click', ev => { ev.stopPropagation(); playlist.splice(i,1); if(currentIndex>=playlist.length) currentIndex=playlist.length-1; renderPlaylist(); });
+    li.addEventListener('click', ev => { ev.stopPropagation(); currentIndex=i; skipThumbOnLoad=false; loadVideoFile(playlist[i].file); renderPlaylist(); });
+    _plList.appendChild(li);
+  });
+  if (_plPanel) _plPanel.style.display = playlist.length > 1 ? 'block' : 'none';
+}
 </script>
 </body>
 </html>
