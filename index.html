@@ -844,8 +844,9 @@ fileInput.addEventListener('change', e => {
   const f = e.target.files && e.target.files[0];
   if (!f) return;
   fileInput.value = '';
-  playlist.push({ file: f, name: f.name, fps: null });
-  preDetectQueueFps(playlist[playlist.length - 1]);
+  const item = { file: f, name: f.name, fps: null, fpsPromise: null };
+  playlist.push(item);
+  item.fpsPromise = preDetectQueueFps(item);
   if (currentIndex === -1) { currentIndex = 0; loadVideoFile(f); }
   else { renderPlaylist(); showToast('已加入佇列 (' + playlist.length + ')'); }
 });
@@ -854,8 +855,9 @@ changeInput.addEventListener('change', e => {
   const f = e.target.files && e.target.files[0];
   if (!f) return;
   changeInput.value = '';
-  playlist.push({ file: f, name: f.name, fps: null });
-  preDetectQueueFps(playlist[playlist.length - 1]);
+  const item = { file: f, name: f.name, fps: null, fpsPromise: null };
+  playlist.push(item);
+  item.fpsPromise = preDetectQueueFps(item);
   if (currentIndex === -1) { currentIndex = 0; loadVideoFile(f); }
   else { renderPlaylist(); showToast('已加入佇列 (' + playlist.length + ')'); }
 });
@@ -873,18 +875,6 @@ function loadVideoFile(file) {
   thumbStatus.textContent = '載入中…';
   thumbStatus.style.display = 'block';
 
-  const queued = playlist[currentIndex] && playlist[currentIndex].file === file ? playlist[currentIndex] : null;
-  const canUseQueuedFps = queued && queued.fps && queueFpsLoading === false;
-
-  if (!skipFpsAndThumb && !canUseQueuedFps) {
-    document.querySelectorAll('.speed-btn').forEach(b => b.classList.remove('active'));
-    document.querySelector('.speed-btn[data-speed="1"]').classList.add('active');
-    currentSpeed = 1; video.playbackRate = 1;
-    fps = 30; fpsDetected = false;
-    document.querySelectorAll('.fps-btn').forEach(b => {
-      b.classList.toggle('active', b.dataset.fps === '30');
-    });
-  }
   resetLoop();
 
   if (currentBlobUrl) { URL.revokeObjectURL(currentBlobUrl); currentBlobUrl = null; }
