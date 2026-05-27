@@ -447,6 +447,9 @@
   .pl-idx { width: 16px; text-align: right; opacity: 0.4; flex-shrink: 0; }
   .pl-fps { font-size: 10px; color: rgba(200,255,71,0.7); flex-shrink: 0; }
   .pl-drag { cursor: grab; opacity: 0.35; padding: 0 2px; flex-shrink: 0; font-size: 13px; user-select: none; }
+  .pl-actions { display: inline-flex; gap: 2px; margin-left: auto; }
+  .pl-act { border: 0; background: rgba(255,255,255,0.08); color: rgba(255,255,255,0.7); font-size: 10px; line-height: 1; padding: 2px 4px; border-radius: 4px; cursor: pointer; }
+  .pl-act:active { transform: scale(0.96); }
   .pl-item.drag-over { border-top: 1px solid rgba(200,255,71,0.8); }
   .pl-item.dragging { opacity: 0.35; }
   .pl-name { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -868,51 +871,76 @@ async function startQueuedItem(i) {
 }
 
 
-/* ── Queue persistence ── */
-function saveQueueState() {
-  try {
-    const data = playlist.map(item => ({ name: item.name, fps: item.fps }));
-    localStorage.setItem('vp_queue_meta', JSON.stringify({ items: data, currentIndex }));
-  } catch(e) {}
+/* ── Queue persistence (IndexedDB) ── */
+const QUEUE_DB = 'vp_queue_db';
+const QUEUE_STORE = 'state';
+let queueDB = null;
+
+function openQueueDB() {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(QUEUE_DB, 1);
+    req.onupgradeneeded = () => {
+      const db = req.result;
+      if (!db.objectStoreNames.contains(QUEUE_STORE)) db.createObjectStore(QUEUE_STORE);
+    };
+    req.onsuccess = () => { queueDB = req.result; resolve(queueDB); };
+    req.onerror = () => reject(req.error);
+  });
 }
-function loadQueueState() {
+
+async function saveQueueState() {
   try {
-    const raw = localStorage.getItem('vp_queue_meta');
-    if (!raw) return;
-    const { items, currentIndex: ci } = JSON.parse(raw);
-    if (!Array.isArray(items) || items.length === 0) return;
-    // We only restore fps metadata for matching filenames; actual File objects must be re-added.
-    window._savedQueueMeta = items;
-    window._savedQueueIndex = ci || 0;
+    if (!queueDB) await openQueueDB();
+    const items = [];
+    for (const item of playlist) {
+      const blob = item.file ? item.file.slice(0, item.file.size, item.file.type) : null;
+      items.push({ name: item.name, fps: item.fps, type: item.file?.type || '', size: item.file?.size || 0, blob });
+    }
+    const payload = { items, currentIndex, ts: Date.now() };
+    const tx = queueDB.transaction(QUEUE_STORE, 'readwrite');
+    tx.objectStore(QUEUE_STORE).put(payload, 'queue');
   } catch(e) {}
 }
 
-/* ── Merge saved fps meta after file drop ── */
-function applyQueueMeta(item) {
-  if (!window._savedQueueMeta) return;
-  const match = window._savedQueueMeta.find(m => m.name === item.name);
-  if (match && typeof match.fps === 'number') {
-    item.fps = match.fps;
-    fpsDetected = true;
+async function loadQueueState() {
+  try {
+    if (!queueDB) await openQueueDB();
+    return await new Promise((resolve) => {
+      const tx = queueDB.transaction(QUEUE_STORE, 'readonly');
+      const req = tx.objectStore(QUEUE_STORE).get('queue');
+      req.onsuccess = () => resolve(req.result || null);
+      req.onerror = () => resolve(null);
+    });
+  } catch(e) { return null; }
+}
+
+async function restoreQueueState() {
+  const saved = await loadQueueState();
+  if (!saved || !Array.isArray(saved.items) || !saved.items.length) return;
+  const restored = [];
+  for (const s of saved.items) {
+    const file = s.blob ? new File([s.blob], s.name, { type: s.type || 'video/*' }) : null;
+    restored.push({ file, name: s.name, fps: s.fps ?? null, fpsPromise: null });
   }
+  playlist.length = 0;
+  restored.forEach(x => playlist.push(x));
+  currentIndex = Math.min(saved.currentIndex || 0, playlist.length - 1);
+  renderPlaylist();
 }
 
-loadQueueState();
+openQueueDB().then(restoreQueueState).catch(() => {});
 
 async function addFileToQueue(f) {
   const item = { file: f, name: f.name, fps: null, fpsPromise: null };
-  applyQueueMeta(item);
   playlist.push(item);
   renderPlaylist();
   showToast('已加入佇列 (' + playlist.length + ')');
   item.fpsPromise = (async () => {
-    if (typeof item.fps !== 'number') {
-      try {
-        const result = await parseFPS(item.file);
-        item.fps = (result && result > 1 && result <= 300) ? snapToCommonFPS(result) : 30;
-      } catch(e) {
-        item.fps = 30;
-      }
+    try {
+      const result = await parseFPS(item.file);
+      item.fps = (result && result > 1 && result <= 300) ? snapToCommonFPS(result) : 30;
+    } catch(e) {
+      item.fps = 30;
     }
     saveQueueState();
     renderPlaylist();
@@ -927,7 +955,7 @@ fileInput.addEventListener('change', async e => {
   if (!f) return;
   fileInput.value = '';
   const item = await addFileToQueue(f);
-  if (currentIndex === -1) { currentIndex = 0; loadVideoFile(f); }
+  if (currentIndex === -1) { currentIndex = 0; loadVideoFile(f); } saveQueueState();
 });
 
 changeInput.addEventListener('change', async e => {
@@ -935,7 +963,7 @@ changeInput.addEventListener('change', async e => {
   if (!f) return;
   changeInput.value = '';
   const item = await addFileToQueue(f);
-  if (currentIndex === -1) { currentIndex = 0; loadVideoFile(f); }
+  if (currentIndex === -1) { currentIndex = 0; loadVideoFile(f); } saveQueueState();
 });
 
 document.getElementById('change-video-btn').addEventListener('click', e => {
@@ -2558,59 +2586,49 @@ function renderPlaylist() {
   playlist.forEach((item, i) => {
     const li = document.createElement('li');
     li.className = 'pl-item' + (i === currentIndex ? ' current' : '');
-    li.draggable = true;
     const fpsText = (typeof item.fps === 'number') ? `<span class="pl-fps">${item.fps}fps</span>` : '';
     li.innerHTML =
-      '<span class="pl-drag">⠿</span>' +
       '<span class="pl-idx">' + (i+1) + '</span>' +
       '<span class="pl-name">' + item.name + '</span>' +
       fpsText +
-      '<span class="pl-del">✕</span>';
-    li.querySelector('.pl-del').addEventListener('click', ev => {
-      ev.stopPropagation();
+      '<span class="pl-actions">'
+      + '<button class="pl-act pl-up">↑</button>'
+      + '<button class="pl-act pl-down">↓</button>'
+      + '<button class="pl-act pl-top">⇈</button>'
+      + '<button class="pl-act pl-bottom">⇊</button>'
+      + '<button class="pl-act pl-del">✕</button>'
+      + '</span>';
+    const act = (sel, fn) => li.querySelector(sel).addEventListener('click', ev => { ev.stopPropagation(); fn(); });
+    act('.pl-del', () => {
       playlist.splice(i, 1);
       if (currentIndex >= playlist.length) currentIndex = playlist.length - 1;
       saveQueueState();
       renderPlaylist();
     });
+    act('.pl-up', () => reorderQueue(i, i - 1));
+    act('.pl-down', () => reorderQueue(i, i + 1));
+    act('.pl-top', () => reorderQueue(i, 0));
+    act('.pl-bottom', () => reorderQueue(i, playlist.length - 1));
     li.addEventListener('click', ev => {
-      if (ev.target.classList.contains('pl-del') || ev.target.classList.contains('pl-drag')) return;
+      if (ev.target.closest('.pl-actions')) return;
       ev.stopPropagation();
       startQueuedItem(i);
-    });
-    // drag-and-drop reorder
-    li.addEventListener('dragstart', ev => {
-      ev.dataTransfer.effectAllowed = 'move';
-      ev.dataTransfer.setData('text/plain', i);
-      li.classList.add('dragging');
-    });
-    li.addEventListener('dragend', () => {
-      document.querySelectorAll('.pl-item').forEach(el => el.classList.remove('drag-over', 'dragging'));
-    });
-    li.addEventListener('dragover', ev => {
-      ev.preventDefault();
-      ev.dataTransfer.dropEffect = 'move';
-      document.querySelectorAll('.pl-item').forEach(el => el.classList.remove('drag-over'));
-      li.classList.add('drag-over');
-    });
-    li.addEventListener('drop', ev => {
-      ev.preventDefault();
-      const from = parseInt(ev.dataTransfer.getData('text/plain'));
-      const to = i;
-      if (from === to) return;
-      const moved = playlist.splice(from, 1)[0];
-      playlist.splice(to, 0, moved);
-      if (currentIndex === from) currentIndex = to;
-      else if (currentIndex > from && currentIndex <= to) currentIndex--;
-      else if (currentIndex < from && currentIndex >= to) currentIndex++;
-      saveQueueState();
-      renderPlaylist();
     });
     _playlistList.appendChild(li);
   });
   if (_playlistPanel) _playlistPanel.style.display = playlist.length > 1 ? 'block' : 'none';
 }
 
+function reorderQueue(from, to) {
+  if (from === to || from < 0 || to < 0 || from >= playlist.length || to >= playlist.length) return;
+  const moved = playlist.splice(from, 1)[0];
+  playlist.splice(to, 0, moved);
+  if (currentIndex === from) currentIndex = to;
+  else if (currentIndex > from && currentIndex <= to) currentIndex--;
+  else if (currentIndex < from && currentIndex >= to) currentIndex++;
+  saveQueueState();
+  renderPlaylist();
+}
 /* ── Auto-next toggle ── */
 (function() {
   const btn = document.getElementById('auto-next-toggle');
