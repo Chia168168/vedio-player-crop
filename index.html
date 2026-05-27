@@ -956,8 +956,15 @@ fileInput.addEventListener('change', e => {
   if (!f) return;
   fileInput.value = '';
   const first = playlist.length === 0;
+  if (first) {
+    currentIndex = 0;
+    uploadScreen.style.display = 'none';
+    playerScreen.style.display = 'block';
+    showPanel();
+    requestWakeLock();
+    loadVideoFile(f);
+  }
   addFileToQueue(f).catch(() => {});
-  if (first) { currentIndex = 0; loadVideoFile(f); }
   saveQueueState();
 });
 
@@ -966,8 +973,15 @@ changeInput.addEventListener('change', e => {
   if (!f) return;
   changeInput.value = '';
   const first = playlist.length === 0;
+  if (first) {
+    currentIndex = 0;
+    uploadScreen.style.display = 'none';
+    playerScreen.style.display = 'block';
+    showPanel();
+    requestWakeLock();
+    loadVideoFile(f);
+  }
   addFileToQueue(f).catch(() => {});
-  if (first) { currentIndex = 0; loadVideoFile(f); }
   saveQueueState();
 });
 
