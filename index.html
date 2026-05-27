@@ -935,6 +935,7 @@ async function addFileToQueue(f) {
   playlist.push(item);
   renderPlaylist();
   showToast('已加入佇列 (' + playlist.length + ')');
+  if (playlist.length === 1) loadVideoFile(f);
   item.fpsPromise = (async () => {
     try {
       const result = await parseFPS(item.file);
@@ -950,21 +951,23 @@ async function addFileToQueue(f) {
   return item;
 }
 
-fileInput.addEventListener('change', async e => {
+fileInput.addEventListener('change', e => {
   const f = e.target.files && e.target.files[0];
   if (!f) return;
   fileInput.value = '';
-  const item = await addFileToQueue(f);
-  if (playlist.length === 1) { currentIndex = 0; loadVideoFile(f); } else if (currentIndex === -1) { currentIndex = 0; loadVideoFile(f); }
+  const first = playlist.length === 0;
+  addFileToQueue(f).catch(() => {});
+  if (first) { currentIndex = 0; loadVideoFile(f); }
   saveQueueState();
 });
 
-changeInput.addEventListener('change', async e => {
+changeInput.addEventListener('change', e => {
   const f = e.target.files && e.target.files[0];
   if (!f) return;
   changeInput.value = '';
-  const item = await addFileToQueue(f);
-  if (playlist.length === 1) { currentIndex = 0; loadVideoFile(f); } else if (currentIndex === -1) { currentIndex = 0; loadVideoFile(f); }
+  const first = playlist.length === 0;
+  addFileToQueue(f).catch(() => {});
+  if (first) { currentIndex = 0; loadVideoFile(f); }
   saveQueueState();
 });
 
