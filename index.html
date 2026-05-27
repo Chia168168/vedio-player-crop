@@ -2602,7 +2602,7 @@ function handleTouchReorderEnd(e) {
   const drag = _touchDrag;
   _touchDrag = null;
   const items = Array.from(_plList.querySelectorAll('.pl-item'));
-  items.forEach(el => el.classList.remove('dragging', 'drop-before', 'drop-after'));
+  items.forEach(el => el.classList.remove('dragging', 'drop-before', 'drop-after', 'drag-source'));
   if (!drag.active) return;
   const t = (e.changedTouches && e.changedTouches[0]) ? e.changedTouches[0] : null;
   if (!t) return;
@@ -2618,7 +2618,7 @@ function renderPlaylist() {
     li.innerHTML = '<span class="pl-idx">' + (i+1) + '</span><span class="pl-name">' + item.name + '</span><span class="pl-del">✕</span>';
     li.querySelector('.pl-del').addEventListener('click', ev => { ev.stopPropagation(); playlist.splice(i,1); if(currentIndex>=playlist.length) currentIndex=playlist.length-1; renderPlaylist(); });
     li.addEventListener('click', ev => { if (_touchDrag && _touchDrag.active) return; ev.stopPropagation(); currentIndex=i; skipThumbOnLoad=false; loadVideoFile(playlist[i].file); renderPlaylist(); });
-    li.addEventListener('dragstart', ev => { _dragSrcIndex = i; ev.dataTransfer.effectAllowed = 'move'; try { ev.dataTransfer.setData('text/plain', String(i)); } catch(_) {} });
+    li.addEventListener('dragstart', ev => { _dragSrcIndex = i; li.classList.add('drag-source'); ev.dataTransfer.effectAllowed = 'move'; try { ev.dataTransfer.setData('text/plain', String(i)); } catch(_) {} });
     li.addEventListener('dragover', ev => { ev.preventDefault(); });
     li.addEventListener('drop', ev => {
       ev.preventDefault();
@@ -2627,7 +2627,7 @@ function renderPlaylist() {
       _dragSrcIndex = -1;
       movePlaylistItem(from, to);
     });
-    li.addEventListener('dragend', () => { _dragSrcIndex = -1; });
+    li.addEventListener('dragend', () => { _dragSrcIndex = -1; li.classList.remove('drag-source'); });
     li.addEventListener('touchstart', ev => handleTouchReorderStart(li, i, ev), { passive: true });
     li.addEventListener('touchmove', handleTouchReorderMove, { passive: false });
     li.addEventListener('touchend', handleTouchReorderEnd, { passive: true });
