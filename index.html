@@ -958,11 +958,7 @@ fileInput.addEventListener('change', e => {
   const first = playlist.length === 0;
   if (first) {
     currentIndex = 0;
-    uploadScreen.style.display = 'none';
-    playerScreen.style.display = 'block';
-    showPanel();
-    requestWakeLock();
-    loadVideoFile(f);
+    setTimeout(() => loadVideoFile(f), 0);
   }
   addFileToQueue(f).catch(() => {});
   saveQueueState();
@@ -975,11 +971,7 @@ changeInput.addEventListener('change', e => {
   const first = playlist.length === 0;
   if (first) {
     currentIndex = 0;
-    uploadScreen.style.display = 'none';
-    playerScreen.style.display = 'block';
-    showPanel();
-    requestWakeLock();
-    loadVideoFile(f);
+    setTimeout(() => loadVideoFile(f), 0);
   }
   addFileToQueue(f).catch(() => {});
   saveQueueState();
@@ -996,6 +988,11 @@ function showUploadScreen() {
 }
 
 function loadVideoFile(file) {
+  uploadScreen.style.display = 'none';
+  playerScreen.style.display = 'block';
+  showPanel();
+  requestWakeLock();
+  showToast('進入播放畫面');
   uploadScreen.style.display = 'none';
   playerScreen.style.display = 'block';
   showPanel();
