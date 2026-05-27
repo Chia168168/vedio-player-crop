@@ -955,7 +955,8 @@ fileInput.addEventListener('change', async e => {
   if (!f) return;
   fileInput.value = '';
   const item = await addFileToQueue(f);
-  if (currentIndex === -1) { currentIndex = 0; loadVideoFile(f); } saveQueueState();
+  if (playlist.length === 1) { currentIndex = 0; loadVideoFile(f); } else if (currentIndex === -1) { currentIndex = 0; loadVideoFile(f); }
+  saveQueueState();
 });
 
 changeInput.addEventListener('change', async e => {
@@ -963,7 +964,8 @@ changeInput.addEventListener('change', async e => {
   if (!f) return;
   changeInput.value = '';
   const item = await addFileToQueue(f);
-  if (currentIndex === -1) { currentIndex = 0; loadVideoFile(f); } saveQueueState();
+  if (playlist.length === 1) { currentIndex = 0; loadVideoFile(f); } else if (currentIndex === -1) { currentIndex = 0; loadVideoFile(f); }
+  saveQueueState();
 });
 
 document.getElementById('change-video-btn').addEventListener('click', e => {
@@ -977,6 +979,10 @@ function showUploadScreen() {
 }
 
 function loadVideoFile(file) {
+  uploadScreen.style.display = 'none';
+  playerScreen.style.display = 'block';
+  showPanel();
+  requestWakeLock();
   stopFrameMode();
   video.pause();
   isPlaying = false; setPlayIcon(false);
