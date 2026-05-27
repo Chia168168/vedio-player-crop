@@ -958,6 +958,7 @@ fileInput.addEventListener('change', e => {
   const first = playlist.length === 0;
   if (first) {
     currentIndex = 0;
+    primeIOSVideo();
     forcePlayerMode();
     setTimeout(() => loadVideoFile(f), 0);
   }
@@ -972,6 +973,7 @@ changeInput.addEventListener('change', e => {
   const first = playlist.length === 0;
   if (first) {
     currentIndex = 0;
+    primeIOSVideo();
     forcePlayerMode();
     setTimeout(() => loadVideoFile(f), 0);
   }
@@ -980,7 +982,7 @@ changeInput.addEventListener('change', e => {
 });
 
 document.getElementById('change-video-btn').addEventListener('click', e => {
-  e.stopPropagation(); forcePlayerMode(); changeInput.click();
+  e.stopPropagation(); primeIOSVideo(); forcePlayerMode(); changeInput.click();
 });
 
 function showUploadScreen() {
@@ -995,10 +997,19 @@ function forcePlayerMode() {
   playerScreen.style.visibility = 'visible';
   playerScreen.style.opacity = '1';
   showPanel();
-  requestWakeLock();
+}
+
+function primeIOSVideo() {
+  if (!video) return;
+  video.setAttribute('playsinline', '');
+  video.setAttribute('webkit-playsinline', '');
+  video.muted = true;
+  video.autoplay = false;
+  video.controls = false;
 }
 
 function loadVideoFile(file) {
+  primeIOSVideo();
   forcePlayerMode();
   showToast('進入播放畫面');
   uploadScreen.style.display = 'none';
