@@ -1405,8 +1405,11 @@ video.addEventListener('ended', () => {
     renderPlaylist();
     video.addEventListener('canplay', function ap() {
       video.removeEventListener('canplay', ap);
+      enterSimplePlayUI();
       video.play(); isPlaying = true; setPlayIcon(true);
+      enterSimplePlayUI();
     });
+    enterSimplePlayUI();
     return;
   }
   isPlaying = false; setPlayIcon(false);
