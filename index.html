@@ -2606,12 +2606,12 @@ function handleTouchReorderMove(e) {
     e.preventDefault();
   }
   const items = Array.from(_plList.querySelectorAll('.pl-item'));
-  let idx = getInsertIndexFromY(t.clientY);
-  const movingDown = idx > drag.index;
-  if (movingDown) idx -= 1;
-  idx = Math.max(0, Math.min(playlist.length - 1, idx));
+  const raw = getInsertIndexFromY(t.clientY);
+  let to = raw;
+  if (to > _touchDrag.index) to -= 1;
+  to = Math.max(0, Math.min(playlist.length - 1, to));
   items.forEach(el => el.classList.remove('drop-before', 'drop-after'));
-  const target = items[idx];
+  const target = items[to];
   if (target) {
     const r = target.getBoundingClientRect();
     target.classList.add(t.clientY < r.top + r.height / 2 ? 'drop-before' : 'drop-after');
@@ -2626,7 +2626,8 @@ function handleTouchReorderEnd(e) {
   if (!drag.active) return;
   const t = (e.changedTouches && e.changedTouches[0]) ? e.changedTouches[0] : null;
   if (!t) return;
-  let to = getInsertIndexFromY(t.clientY);
+  const raw = getInsertIndexFromY(t.clientY);
+  let to = raw;
   if (to > drag.index) to -= 1;
   to = Math.max(0, Math.min(playlist.length - 1, to));
   movePlaylistItem(drag.index, to);
