@@ -736,6 +736,14 @@ function hidePanel() {
   clearTimeout(autoHideTimer);
 }
 
+function enterSimplePlayUI() {
+  panelVisible = false;
+  controls.classList.add('hidden');
+  miniBar.classList.add('show');
+  timeOverlay.classList.remove('hidden');
+  clearTimeout(autoHideTimer);
+}
+
 document.getElementById('hide-pill').querySelector('button').addEventListener('click', hidePanel);
 document.getElementById('mini-expand').addEventListener('click', showPanel);
 
