@@ -2587,7 +2587,7 @@ function getInsertIndexFromY(y) {
     const r = items[i].getBoundingClientRect();
     if (y < r.top + r.height / 2) return i;
   }
-  return items.length - 1;
+  return items.length;
 }
 function handleTouchReorderStart(li, i, e) {
   if (!e.touches || e.touches.length !== 1) return;
@@ -2605,9 +2605,12 @@ function handleTouchReorderMove(e) {
     _touchDrag.ghost.classList.add('dragging');
     e.preventDefault();
   }
-  const idx = getInsertIndexFromY(t.clientY);
-  Array.from(_plList.querySelectorAll('.pl-item')).forEach(el => el.classList.remove('drop-before', 'drop-after'));
   const items = Array.from(_plList.querySelectorAll('.pl-item'));
+  let idx = getInsertIndexFromY(t.clientY);
+  const movingDown = idx > drag.index;
+  if (movingDown) idx -= 1;
+  idx = Math.max(0, Math.min(playlist.length - 1, idx));
+  items.forEach(el => el.classList.remove('drop-before', 'drop-after'));
   const target = items[idx];
   if (target) {
     const r = target.getBoundingClientRect();
@@ -2623,7 +2626,9 @@ function handleTouchReorderEnd(e) {
   if (!drag.active) return;
   const t = (e.changedTouches && e.changedTouches[0]) ? e.changedTouches[0] : null;
   if (!t) return;
-  const to = Math.max(0, Math.min(playlist.length - 1, getInsertIndexFromY(t.clientY)));
+  let to = getInsertIndexFromY(t.clientY);
+  if (to > drag.index) to -= 1;
+  to = Math.max(0, Math.min(playlist.length - 1, to));
   movePlaylistItem(drag.index, to);
 }
 function renderPlaylist() {
