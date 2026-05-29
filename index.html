@@ -475,13 +475,7 @@
 
 </style>
 
-<script>
-/* Register Service Worker for COI headers (SharedArrayBuffer support) */
-if ('serviceWorker' in navigator) {
-  navigator.serviceWorker.register('./sw.js', { scope: './' })
-    .catch(err => console.warn('SW:', err));
-}
-</script>
+
 </head>
 <body>
 
