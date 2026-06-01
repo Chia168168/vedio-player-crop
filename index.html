@@ -1034,7 +1034,13 @@ function onMetaLoaded() {
   if (skipThumbOnLoad) {
     skipThumbOnLoad = false;
     thumbStatus.style.display = 'none';
-    skipBlackFrames().then(t => { video.currentTime = t; });
+    skipBlackFrames().then(t => {
+      if (t > 0) {
+        video.currentTime = t;
+        setTimeout(() => { if (video.currentTime < t) video.currentTime = t; }, 300);
+        setTimeout(() => { if (video.currentTime < t) video.currentTime = t; }, 800);
+      }
+    });
     return;
   }
   skipBlackFrames().then(t => {
@@ -1439,7 +1445,7 @@ function toggleFrameMode() {
 }
 
 video.addEventListener('timeupdate', () => {
-  if (blackStartTime > 0 && video.currentTime < blackStartTime && !video.paused) {
+  if (blackStartTime > 0 && video.currentTime < blackStartTime) {
     video.currentTime = blackStartTime;
     return;
   }
