@@ -456,15 +456,26 @@
 .pl-idx { width:16px; text-align:right; opacity:0.4; flex-shrink:0; }
 .pl-name { flex:1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .pl-del { flex-shrink:0; font-size:12px; opacity:0.3; padding:0 4px; color:#fff; }
+
+.pl-item.dragging {
+  opacity: 0.35 !important;
+  transform: scale(0.985) !important;
+}
+.pl-item.drop-before {
+  box-shadow: inset 0 3px 0 var(--accent2), 0 -1px 0 rgba(255,255,255,0.06) !important;
+  background: rgba(71,212,255,0.08) !important;
+}
+.pl-item.drop-after {
+  box-shadow: inset 0 -3px 0 var(--accent2), 0 1px 0 rgba(255,255,255,0.06) !important;
+  background: rgba(71,212,255,0.08) !important;
+}
+.pl-item.drag-source {
+  outline: 1px solid rgba(200,255,71,0.25) !important;
+}
+
 </style>
 
-<script>
-/* Register Service Worker for COI headers (SharedArrayBuffer support) */
-if ('serviceWorker' in navigator) {
-  navigator.serviceWorker.register('./sw.js', { scope: './' })
-    .catch(err => console.warn('SW:', err));
-}
-</script>
+
 </head>
 <body>
 
@@ -716,6 +727,14 @@ function hidePanel() {
   panelVisible = false;
   controls.classList.add('hidden');
   miniBar.classList.add('show');
+  clearTimeout(autoHideTimer);
+}
+
+function enterSimplePlayUI() {
+  panelVisible = false;
+  controls.classList.add('hidden');
+  miniBar.classList.add('show');
+  timeOverlay.classList.remove('hidden');
   clearTimeout(autoHideTimer);
 }
 
@@ -1380,8 +1399,11 @@ video.addEventListener('ended', () => {
     renderPlaylist();
     video.addEventListener('canplay', function ap() {
       video.removeEventListener('canplay', ap);
+      enterSimplePlayUI();
       video.play(); isPlaying = true; setPlayIcon(true);
+      enterSimplePlayUI();
     });
+    enterSimplePlayUI();
     return;
   }
   isPlaying = false; setPlayIcon(false);
@@ -2570,7 +2592,7 @@ function getInsertIndexFromY(y) {
     const r = items[i].getBoundingClientRect();
     if (y < r.top + r.height / 2) return i;
   }
-  return items.length - 1;
+  return items.length;
 }
 function handleTouchReorderStart(li, i, e) {
   if (!e.touches || e.touches.length !== 1) return;
@@ -2588,10 +2610,13 @@ function handleTouchReorderMove(e) {
     _touchDrag.ghost.classList.add('dragging');
     e.preventDefault();
   }
-  const idx = getInsertIndexFromY(t.clientY);
-  Array.from(_plList.querySelectorAll('.pl-item')).forEach(el => el.classList.remove('drop-before', 'drop-after'));
   const items = Array.from(_plList.querySelectorAll('.pl-item'));
-  const target = items[idx];
+  const raw = getInsertIndexFromY(t.clientY);
+  let to = raw;
+  if (to > _touchDrag.index) to -= 1;
+  to = Math.max(0, Math.min(playlist.length - 1, to));
+  items.forEach(el => el.classList.remove('drop-before', 'drop-after'));
+  const target = items[to];
   if (target) {
     const r = target.getBoundingClientRect();
     target.classList.add(t.clientY < r.top + r.height / 2 ? 'drop-before' : 'drop-after');
@@ -2606,7 +2631,10 @@ function handleTouchReorderEnd(e) {
   if (!drag.active) return;
   const t = (e.changedTouches && e.changedTouches[0]) ? e.changedTouches[0] : null;
   if (!t) return;
-  const to = Math.max(0, Math.min(playlist.length - 1, getInsertIndexFromY(t.clientY)));
+  const raw = getInsertIndexFromY(t.clientY);
+  let to = raw;
+  if (to > drag.index) to -= 1;
+  to = Math.max(0, Math.min(playlist.length - 1, to));
   movePlaylistItem(drag.index, to);
 }
 function renderPlaylist() {
