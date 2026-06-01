@@ -976,6 +976,8 @@ function loadVideoFile(file) {
 
   try {
     currentBlobUrl = URL.createObjectURL(file);
+  playbackArmed = false;
+  playbackStartAt = 0;
   } catch(e) {
     showToast('無法開啟檔案'); return;
   }
@@ -1502,45 +1504,47 @@ video.addEventListener('timeupdate', () => {
 
 let playbackStallTimer = null;
 let playbackStallCount = 0;
+let playbackStartAt = 0;
+let playbackArmed = false;
 function clearPlaybackStallTimer() {
   if (playbackStallTimer) { clearTimeout(playbackStallTimer); playbackStallTimer = null; }
 }
 function armPlaybackStallTimer() {
   clearPlaybackStallTimer();
-  if (video.paused) return;
+  if (!playbackArmed || video.paused) return;
   playbackStallTimer = setTimeout(async () => {
-    if (video.paused) return;
+    if (!playbackArmed || video.paused) return;
     const before = video.currentTime;
     playbackStallCount++;
     try {
       if (video.buffered && video.buffered.length) {
         const end = video.buffered.end(video.buffered.length - 1);
-        if (end > before + 0.3) {
-          video.currentTime = Math.min(end - 0.05, before + 0.25);
-        }
+        if (end > before + 1.0) video.currentTime = Math.min(end - 0.1, before + 0.5);
       }
     } catch(e) {}
     try { await video.play(); } catch(e) {}
-    if (video.currentTime === before && playbackStallCount >= 2) {
-      try {
-        const src = video.src;
-        video.pause();
-        video.src = '';
-        video.load();
-        setTimeout(() => { if (src) { video.src = src; video.load(); video.play().catch(()=>{}); } }, 250);
-      } catch(e) {}
+    if (video.currentTime === before && playbackStallCount >= 3) {
       playbackStallCount = 0;
+      // only soft-retry play; do not clear src, that often freezes big files
+      try { await video.play(); } catch(e) {}
     }
     armPlaybackStallTimer();
-  }, 3000);
+  }, 5000);
 }
-video.addEventListener('playing', () => { playbackStallCount = 0; armPlaybackStallTimer(); });
+video.addEventListener('playing', () => {
+  if (!playbackArmed && video.currentTime > playbackStartAt + 0.5) playbackArmed = true;
+  playbackStallCount = 0;
+  armPlaybackStallTimer();
+});
 video.addEventListener('pause', clearPlaybackStallTimer);
-video.addEventListener('waiting', armPlaybackStallTimer);
-video.addEventListener('stalled', armPlaybackStallTimer);
-video.addEventListener('suspend', armPlaybackStallTimer);
-video.addEventListener('canplay', armPlaybackStallTimer);
-video.addEventListener('timeupdate', armPlaybackStallTimer);
+video.addEventListener('waiting', () => { if (playbackArmed) armPlaybackStallTimer(); });
+video.addEventListener('stalled', () => { if (playbackArmed) armPlaybackStallTimer(); });
+video.addEventListener('suspend', () => { if (playbackArmed) armPlaybackStallTimer(); });
+video.addEventListener('canplay', () => { if (playbackArmed) armPlaybackStallTimer(); });
+video.addEventListener('timeupdate', () => {
+  if (!playbackArmed && video.currentTime > playbackStartAt + 0.5) playbackArmed = true;
+  if (playbackArmed) armPlaybackStallTimer();
+});
 video.addEventListener('ended', () => {
   stopFrameMode(); clearTimeout(autoHideTimer);
   if (autoPlayNext && currentIndex >= 0 && currentIndex + 1 < playlist.length) {
