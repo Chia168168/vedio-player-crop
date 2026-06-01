@@ -1499,6 +1499,48 @@ video.addEventListener('timeupdate', () => {
   }
   updateUI();
 });
+
+let playbackStallTimer = null;
+let playbackStallCount = 0;
+function clearPlaybackStallTimer() {
+  if (playbackStallTimer) { clearTimeout(playbackStallTimer); playbackStallTimer = null; }
+}
+function armPlaybackStallTimer() {
+  clearPlaybackStallTimer();
+  if (video.paused) return;
+  playbackStallTimer = setTimeout(async () => {
+    if (video.paused) return;
+    const before = video.currentTime;
+    playbackStallCount++;
+    try {
+      if (video.buffered && video.buffered.length) {
+        const end = video.buffered.end(video.buffered.length - 1);
+        if (end > before + 0.3) {
+          video.currentTime = Math.min(end - 0.05, before + 0.25);
+        }
+      }
+    } catch(e) {}
+    try { await video.play(); } catch(e) {}
+    if (video.currentTime === before && playbackStallCount >= 2) {
+      try {
+        const src = video.src;
+        video.pause();
+        video.src = '';
+        video.load();
+        setTimeout(() => { if (src) { video.src = src; video.load(); video.play().catch(()=>{}); } }, 250);
+      } catch(e) {}
+      playbackStallCount = 0;
+    }
+    armPlaybackStallTimer();
+  }, 3000);
+}
+video.addEventListener('playing', () => { playbackStallCount = 0; armPlaybackStallTimer(); });
+video.addEventListener('pause', clearPlaybackStallTimer);
+video.addEventListener('waiting', armPlaybackStallTimer);
+video.addEventListener('stalled', armPlaybackStallTimer);
+video.addEventListener('suspend', armPlaybackStallTimer);
+video.addEventListener('canplay', armPlaybackStallTimer);
+video.addEventListener('timeupdate', armPlaybackStallTimer);
 video.addEventListener('ended', () => {
   stopFrameMode(); clearTimeout(autoHideTimer);
   if (autoPlayNext && currentIndex >= 0 && currentIndex + 1 < playlist.length) {
