@@ -682,24 +682,6 @@ let panelVisible = true;
 let autoHideTimer = null;
 
 // ── Utils ──
-
-
-// ── Startup cleanup: unregister SW and clear caches ──
-async function cleanupSWAndCache() {
-  try {
-    if ('serviceWorker' in navigator) {
-      const regs = await navigator.serviceWorker.getRegistrations();
-      await Promise.all(regs.map(r => r.unregister()));
-    }
-  } catch (e) {}
-  try {
-    if ('caches' in window) {
-      const keys = await caches.keys();
-      await Promise.all(keys.map(k => caches.delete(k)));
-    }
-  } catch (e) {}
-}
-cleanupSWAndCache();
 function formatTime(s) {
   const m = Math.floor(s / 60);
   const sec = (s % 60).toFixed(3);
@@ -975,10 +957,7 @@ function loadVideoFile(file) {
   currentFile = file;
 
   try {
-    bigFile = file.size > 524288000;
-  currentBlobUrl = URL.createObjectURL(file);
-  playbackArmed = false;
-  playbackStartAt = 0;
+    currentBlobUrl = URL.createObjectURL(file);
   } catch(e) {
     showToast('無法開啟檔案'); return;
   }
@@ -1018,7 +997,6 @@ function loadVideoFile(file) {
   // Set src once, then load once
   video.src = currentBlobUrl;
   video.load();
-  // skipBlackFrames() will seek to first non-black frame after metadata loads
 }
 
 function onMetaLoaded() {
@@ -1055,94 +1033,10 @@ function onMetaLoaded() {
   if (skipThumbOnLoad) {
     skipThumbOnLoad = false;
     thumbStatus.style.display = 'none';
-    if (!bigFile) skipBlackFrames().then(t => {
-      if (t > 0) {
-        video.currentTime = t;
-        setTimeout(() => { if (video.currentTime < t) video.currentTime = t; }, 300);
-        setTimeout(() => { if (video.currentTime < t) video.currentTime = t; }, 800);
-      }
-    });
     return;
   }
-  skipBlackFrames().then(t => {
-    if (t > 0) {
-      video.currentTime = t;
-      setTimeout(() => { if (video.currentTime < t) video.currentTime = t; }, 300);
-      setTimeout(() => { if (video.currentTime < t) video.currentTime = t; }, 800);
-    }
-    generateThumbnails();
-  });
+  generateThumbnails();
 }
-
-// ── Skip leading black frames ──
-// Lightweight version: only probe a few fixed timestamps, short timeout per seek
-// Safe for large files (2GB+) — won't block playback
-async function skipBlackFrames() {
-  blackStartTime = 0;
-  const sc = document.createElement('canvas');
-  sc.width = 64; sc.height = 36;
-  const ctx = sc.getContext('2d');
-  const avgThreshold = 6;
-  const maxThreshold = 20;
-  const fpsSample = (typeof fps === 'number' && fps > 0) ? fps : 30;
-  const frameDur = 1 / fpsSample;
-
-  // Probe at most 30 frames, but give up each seek after 600ms
-  // If seek times out → assume non-black (don't block user)
-  const maxFrames = Math.min(30, Math.floor(duration * fpsSample));
-
-  function isBright() {
-    try {
-      ctx.drawImage(video, 0, 0, 64, 36);
-      const px = ctx.getImageData(0, 0, 64, 36).data;
-      let maxB = 0, total = 0;
-      for (let i = 0; i < px.length; i += 4) {
-        const lum = 0.299 * px[i] + 0.587 * px[i+1] + 0.114 * px[i+2];
-        if (lum > maxB) maxB = lum;
-        total += lum;
-      }
-      const avg = total / (px.length / 4);
-      return { bright: avg > avgThreshold || maxB > maxThreshold, avg, maxB };
-    } catch(e) { return { bright: true, avg: 0, maxB: 0 }; }
-  }
-
-  // First check frame 0 without seeking (already there after load)
-  await new Promise(res => setTimeout(res, 100)); // let browser paint first frame
-  const f0 = isBright();
-  console.log(`[skipBlack] f=0 t=0 avg=${f0.avg.toFixed(1)} max=${f0.maxB.toFixed(1)}`);
-  if (f0.bright) { console.log('[skipBlack] Frame 0 is bright, no skip needed'); return 0; }
-
-  for (let f = 1; f < maxFrames; f++) {
-    const t = f * frameDur;
-    if (t >= duration) break;
-
-    let seekDone = false;
-    await new Promise(res => {
-      const timer = setTimeout(() => { seekDone = true; res(); }, 600); // give up after 600ms
-      video.addEventListener('seeked', function h() {
-        clearTimeout(timer); seekDone = false;
-        video.removeEventListener('seeked', h); res();
-      }, { once: true });
-      video.currentTime = t;
-    });
-
-    if (seekDone) {
-      // Seek timed out — large file not buffered yet, stop scanning
-      console.log(`[skipBlack] Seek timeout at f=${f}, giving up`);
-      break;
-    }
-
-    const result = isBright();
-    console.log(`[skipBlack] f=${f} t=${t.toFixed(3)} avg=${result.avg.toFixed(1)} max=${result.maxB.toFixed(1)}`);
-    if (result.bright) {
-      console.log(`[skipBlack] First non-black at f=${f} t=${t.toFixed(3)}`);
-      blackStartTime = t;
-      return t;
-    }
-  }
-  return 0;
-}
-
 
 // ── Video error handling ──
 video.addEventListener('error', () => {
@@ -1346,11 +1240,7 @@ function seekExact(t) {
   return new Promise(resolve => {
     const clamped = Math.max(0, Math.min(duration - 0.001, t));
     if (Math.abs(video.currentTime - clamped) < 0.0001) { resolve(); return; }
-    const timeout = setTimeout(() => {
-      video.removeEventListener('seeked', done);
-      resolve();
-    }, 3000);
-    const done = () => { clearTimeout(timeout); video.removeEventListener('seeked', done); resolve(); };
+    const done = () => { video.removeEventListener('seeked', done); resolve(); };
     video.addEventListener('seeked', done);
     video.currentTime = clamped;
   });
@@ -1495,58 +1385,7 @@ function toggleFrameMode() {
   }, 1000);
 }
 
-video.addEventListener('timeupdate', () => {
-  if (!bigFile && blackStartTime > 0 && video.currentTime < blackStartTime) {
-    video.currentTime = blackStartTime;
-    return;
-  }
-  updateUI();
-});
-
-let bigFile = false; // true when file >= 500MB — disables all extra seeks
-let playbackStallTimer = null;
-let playbackStallCount = 0;
-let playbackStartAt = 0;
-let playbackArmed = false;
-function clearPlaybackStallTimer() {
-  if (playbackStallTimer) { clearTimeout(playbackStallTimer); playbackStallTimer = null; }
-}
-function armPlaybackStallTimer() {
-  clearPlaybackStallTimer();
-  if (bigFile || !playbackArmed || video.paused) return;
-  playbackStallTimer = setTimeout(async () => {
-    if (!playbackArmed || video.paused) return;
-    const before = video.currentTime;
-    playbackStallCount++;
-    try {
-      if (video.buffered && video.buffered.length) {
-        const end = video.buffered.end(video.buffered.length - 1);
-        if (end > before + 1.0) video.currentTime = Math.min(end - 0.1, before + 0.5);
-      }
-    } catch(e) {}
-    try { await video.play(); } catch(e) {}
-    if (video.currentTime === before && playbackStallCount >= 3) {
-      playbackStallCount = 0;
-      // only soft-retry play; do not clear src, that often freezes big files
-      try { await video.play(); } catch(e) {}
-    }
-    armPlaybackStallTimer();
-  }, 5000);
-}
-video.addEventListener('playing', () => {
-  if (!playbackArmed && video.currentTime > playbackStartAt + 0.5) playbackArmed = true;
-  playbackStallCount = 0;
-  armPlaybackStallTimer();
-});
-video.addEventListener('pause', clearPlaybackStallTimer);
-video.addEventListener('waiting', () => { if (playbackArmed) armPlaybackStallTimer(); });
-video.addEventListener('stalled', () => { if (playbackArmed) armPlaybackStallTimer(); });
-video.addEventListener('suspend', () => { if (playbackArmed) armPlaybackStallTimer(); });
-video.addEventListener('canplay', () => { if (playbackArmed) armPlaybackStallTimer(); });
-video.addEventListener('timeupdate', () => {
-  if (!playbackArmed && video.currentTime > playbackStartAt + 0.5) playbackArmed = true;
-  if (playbackArmed) armPlaybackStallTimer();
-});
+video.addEventListener('timeupdate', updateUI);
 video.addEventListener('ended', () => {
   stopFrameMode(); clearTimeout(autoHideTimer);
   if (autoPlayNext && currentIndex >= 0 && currentIndex + 1 < playlist.length) {
@@ -1671,7 +1510,6 @@ progressWrap.addEventListener('mousedown', e => { e.stopPropagation(); scrubProg
 
 // ── Loop range ──
 let loopIn = null, loopOut = null, loopActive = false;
-let blackStartTime = 0; // first non-black frame offset
 const loopRangeOverlay = document.getElementById('loop-range-overlay');
 const loopRangeDisplay = document.getElementById('loop-range-display');
 const loopToggleBtn    = document.getElementById('loop-toggle');
