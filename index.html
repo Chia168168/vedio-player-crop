@@ -997,6 +997,11 @@ function loadVideoFile(file) {
   // Set src once, then load once
   video.src = currentBlobUrl;
   video.load();
+  // Seek away from black frame 0 as soon as any data is available
+  video.addEventListener('loadeddata', function onFirstData() {
+    video.removeEventListener('loadeddata', onFirstData);
+    try { if (video.duration > 0.5) video.currentTime = 0.5; } catch(e) {}
+  }, { once: true });
 }
 
 function onMetaLoaded() {
