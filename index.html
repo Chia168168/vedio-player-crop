@@ -475,13 +475,7 @@
 
 </style>
 
-<script>
-/* Register Service Worker for COI headers (SharedArrayBuffer support) */
-if ('serviceWorker' in navigator) {
-  navigator.serviceWorker.register('./sw.js', { scope: './' })
-    .catch(err => console.warn('SW:', err));
-}
-</script>
+
 </head>
 <body>
 
@@ -1039,8 +1033,12 @@ function onMetaLoaded() {
   if (skipThumbOnLoad) {
     skipThumbOnLoad = false;
     thumbStatus.style.display = 'none';
+    // Seek to 0.5s to avoid black first frame
+    try { if (duration > 0.5) video.currentTime = 0.5; } catch(e) {}
     return;
   }
+  // Seek to 0.5s to avoid black first frame before thumbnail generation
+  try { if (duration > 0.5) video.currentTime = 0.5; } catch(e) {}
   generateThumbnails();
 }
 
@@ -1246,7 +1244,11 @@ function seekExact(t) {
   return new Promise(resolve => {
     const clamped = Math.max(0, Math.min(duration - 0.001, t));
     if (Math.abs(video.currentTime - clamped) < 0.0001) { resolve(); return; }
-    const done = () => { video.removeEventListener('seeked', done); resolve(); };
+    const timeout = setTimeout(() => {
+      video.removeEventListener('seeked', done);
+      resolve();
+    }, 3000);
+    const done = () => { clearTimeout(timeout); video.removeEventListener('seeked', done); resolve(); };
     video.addEventListener('seeked', done);
     video.currentTime = clamped;
   });
