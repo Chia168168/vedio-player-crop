@@ -997,11 +997,25 @@ function loadVideoFile(file) {
   // Set src once, then load once
   video.src = currentBlobUrl;
   video.load();
-  // Seek away from black frame 0 as soon as any data is available
-  video.addEventListener('loadeddata', function onFirstData() {
-    video.removeEventListener('loadeddata', onFirstData);
-    try { if (video.duration > 0.5) video.currentTime = 0.5; } catch(e) {}
-  }, { once: true });
+  // Multi-attempt seek away from black frame 0 — iOS Safari needs this
+  let _initSeekDone = false;
+  function _doInitSeek() {
+    if (_initSeekDone) return;
+    if (video.readyState >= 1 && video.duration > 0.5) {
+      _initSeekDone = true;
+      video.currentTime = 0.5;
+    }
+  }
+  video.addEventListener('loadedmetadata', _doInitSeek, { once: true });
+  video.addEventListener('loadeddata', _doInitSeek, { once: true });
+  video.addEventListener('canplay', _doInitSeek, { once: true });
+  // Fallback: try every 200ms for 3s
+  let _seekRetry = 0;
+  const _seekInterval = setInterval(() => {
+    _seekRetry++;
+    if (_initSeekDone || _seekRetry > 15) { clearInterval(_seekInterval); return; }
+    _doInitSeek();
+  }, 200);
 }
 
 function onMetaLoaded() {
