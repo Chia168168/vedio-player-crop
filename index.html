@@ -975,7 +975,8 @@ function loadVideoFile(file) {
   currentFile = file;
 
   try {
-    currentBlobUrl = URL.createObjectURL(file);
+    bigFile = file.size > 524288000;
+  currentBlobUrl = URL.createObjectURL(file);
   playbackArmed = false;
   playbackStartAt = 0;
   } catch(e) {
@@ -1054,7 +1055,7 @@ function onMetaLoaded() {
   if (skipThumbOnLoad) {
     skipThumbOnLoad = false;
     thumbStatus.style.display = 'none';
-    skipBlackFrames().then(t => {
+    if (!bigFile) skipBlackFrames().then(t => {
       if (t > 0) {
         video.currentTime = t;
         setTimeout(() => { if (video.currentTime < t) video.currentTime = t; }, 300);
@@ -1495,13 +1496,14 @@ function toggleFrameMode() {
 }
 
 video.addEventListener('timeupdate', () => {
-  if (blackStartTime > 0 && video.currentTime < blackStartTime) {
+  if (!bigFile && blackStartTime > 0 && video.currentTime < blackStartTime) {
     video.currentTime = blackStartTime;
     return;
   }
   updateUI();
 });
 
+let bigFile = false; // true when file >= 500MB — disables all extra seeks
 let playbackStallTimer = null;
 let playbackStallCount = 0;
 let playbackStartAt = 0;
@@ -1511,7 +1513,7 @@ function clearPlaybackStallTimer() {
 }
 function armPlaybackStallTimer() {
   clearPlaybackStallTimer();
-  if (!playbackArmed || video.paused) return;
+  if (bigFile || !playbackArmed || video.paused) return;
   playbackStallTimer = setTimeout(async () => {
     if (!playbackArmed || video.paused) return;
     const before = video.currentTime;
