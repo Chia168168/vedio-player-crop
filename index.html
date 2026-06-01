@@ -1034,14 +1034,43 @@ function onMetaLoaded() {
   if (skipThumbOnLoad) {
     skipThumbOnLoad = false;
     thumbStatus.style.display = 'none';
-    // Seek to 0.5s to avoid black first frame
-    try { if (duration > 0.5) video.currentTime = 0.5; } catch(e) {}
+    skipBlackFrames().then(t => { video.currentTime = t; });
     return;
   }
-  // Seek to 0.5s to avoid black first frame before thumbnail generation
-  try { if (duration > 0.5) video.currentTime = 0.5; } catch(e) {}
-  generateThumbnails();
+  skipBlackFrames().then(t => {
+    video.currentTime = t;
+    generateThumbnails();
+  });
 }
+
+// ── Skip leading black frames ──
+async function skipBlackFrames() {
+  const maxFrames = 120;
+  const fpsSample = (typeof fps === 'number' && fps > 0) ? fps : 30;
+  const frameDur = 1 / fpsSample;
+  const sc = document.createElement('canvas');
+  sc.width = 32; sc.height = 18;
+  const ctx = sc.getContext('2d');
+  const threshold = 8;
+  for (let f = 0; f < maxFrames; f++) {
+    const t = f * frameDur;
+    if (t >= duration) break;
+    await new Promise(res => {
+      const timer = setTimeout(res, 1000);
+      video.addEventListener('seeked', function h() {
+        clearTimeout(timer); video.removeEventListener('seeked', h); res();
+      }, { once: true });
+      video.currentTime = t;
+    });
+    ctx.drawImage(video, 0, 0, 32, 18);
+    const px = ctx.getImageData(0, 0, 32, 18).data;
+    let bright = 0;
+    for (let i = 0; i < px.length; i += 4) bright = Math.max(bright, px[i], px[i+1], px[i+2]);
+    if (bright > threshold) return t; // first non-black frame
+  }
+  return 0;
+}
+
 
 // ── Video error handling ──
 video.addEventListener('error', () => {
