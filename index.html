@@ -1049,24 +1049,37 @@ async function skipBlackFrames() {
   const fpsSample = (typeof fps === 'number' && fps > 0) ? fps : 30;
   const frameDur = 1 / fpsSample;
   const sc = document.createElement('canvas');
-  sc.width = 32; sc.height = 18;
+  sc.width = 64; sc.height = 36;
   const ctx = sc.getContext('2d');
-  const threshold = 8;
+  // Use average brightness threshold (more robust than max pixel)
+  const avgThreshold = 6; // average brightness across all pixels
+  const maxThreshold = 20; // OR any pixel brighter than this
   for (let f = 0; f < maxFrames; f++) {
     const t = f * frameDur;
     if (t >= duration) break;
     await new Promise(res => {
-      const timer = setTimeout(res, 1000);
+      const timer = setTimeout(res, 1200);
       video.addEventListener('seeked', function h() {
         clearTimeout(timer); video.removeEventListener('seeked', h); res();
       }, { once: true });
       video.currentTime = t;
     });
-    ctx.drawImage(video, 0, 0, 32, 18);
-    const px = ctx.getImageData(0, 0, 32, 18).data;
-    let bright = 0;
-    for (let i = 0; i < px.length; i += 4) bright = Math.max(bright, px[i], px[i+1], px[i+2]);
-    if (bright > threshold) return t; // first non-black frame
+    ctx.drawImage(video, 0, 0, 64, 36);
+    const px = ctx.getImageData(0, 0, 64, 36).data;
+    let maxBright = 0, totalBright = 0, pixCount = 0;
+    for (let i = 0; i < px.length; i += 4) {
+      const lum = 0.299 * px[i] + 0.587 * px[i+1] + 0.114 * px[i+2];
+      maxBright = Math.max(maxBright, lum);
+      totalBright += lum;
+      pixCount++;
+    }
+    const avgBright = totalBright / pixCount;
+    // Log for debugging
+    console.log(`[skipBlack] f=${f} t=${t.toFixed(4)} avg=${avgBright.toFixed(2)} max=${maxBright.toFixed(2)}`);
+    if (avgBright > avgThreshold || maxBright > maxThreshold) {
+      console.log(`[skipBlack] First non-black at f=${f} t=${t.toFixed(4)}`);
+      return t;
+    }
   }
   return 0;
 }
