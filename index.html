@@ -1045,6 +1045,7 @@ function onMetaLoaded() {
 
 // ── Skip leading black frames ──
 async function skipBlackFrames() {
+  blackStartTime = 0;
   const maxFrames = 120;
   const fpsSample = (typeof fps === 'number' && fps > 0) ? fps : 30;
   const frameDur = 1 / fpsSample;
@@ -1078,6 +1079,7 @@ async function skipBlackFrames() {
     console.log(`[skipBlack] f=${f} t=${t.toFixed(4)} avg=${avgBright.toFixed(2)} max=${maxBright.toFixed(2)}`);
     if (avgBright > avgThreshold || maxBright > maxThreshold) {
       console.log(`[skipBlack] First non-black at f=${f} t=${t.toFixed(4)}`);
+      blackStartTime = t;
       return t;
     }
   }
@@ -1436,7 +1438,13 @@ function toggleFrameMode() {
   }, 1000);
 }
 
-video.addEventListener('timeupdate', updateUI);
+video.addEventListener('timeupdate', () => {
+  if (blackStartTime > 0 && video.currentTime < blackStartTime && !video.paused) {
+    video.currentTime = blackStartTime;
+    return;
+  }
+  updateUI();
+});
 video.addEventListener('ended', () => {
   stopFrameMode(); clearTimeout(autoHideTimer);
   if (autoPlayNext && currentIndex >= 0 && currentIndex + 1 < playlist.length) {
@@ -1561,6 +1569,7 @@ progressWrap.addEventListener('mousedown', e => { e.stopPropagation(); scrubProg
 
 // ── Loop range ──
 let loopIn = null, loopOut = null, loopActive = false;
+let blackStartTime = 0; // first non-black frame offset
 const loopRangeOverlay = document.getElementById('loop-range-overlay');
 const loopRangeDisplay = document.getElementById('loop-range-display');
 const loopToggleBtn    = document.getElementById('loop-toggle');
